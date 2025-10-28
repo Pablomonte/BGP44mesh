@@ -5,10 +5,13 @@ echo "=== Integration Test: BGP Peering ==="
 
 # Check if containers are running
 echo "Checking containers..."
-if ! docker ps | grep -q bird1; then
-    echo "✗ Containers not running. Run 'make deploy-local' first."
+if ! docker compose ps bird1 2>/dev/null | grep -q "Up"; then
+    echo "✗ Container bird1 not running. Run 'make deploy-local' first."
+    echo "Debug: docker compose ps output:"
+    docker compose ps || docker ps -a || true
     exit 1
 fi
+echo "✓ Containers running"
 
 # Wait a bit for BGP to establish
 echo "Waiting for BGP convergence (30s)..."
