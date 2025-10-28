@@ -131,6 +131,11 @@ func (m *Manager) UpdateConnectTo(peerNames []string) error {
 	// Read existing config
 	data, err := os.ReadFile(confPath)
 	if err != nil {
+		// If tinc.conf doesn't exist yet, skip update gracefully
+		// This can happen during startup when TINC container is still initializing
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to read tinc.conf: %w", err)
 	}
 
