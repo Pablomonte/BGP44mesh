@@ -40,6 +40,132 @@ services:
     depends_on:
       - tinc3
 
+  bird4:
+    build: ./docker/bird
+    container_name: bird4
+    network_mode: "service:tinc4"
+    volumes:
+      - ./configs/bird:/etc/bird:ro
+    environment:
+      - BGP_AS=${BGP_AS:-65000}
+      - ROUTER_ID=192.0.2.4
+    restart: unless-stopped
+    depends_on:
+      - tinc4
+
+  bird5:
+    build: ./docker/bird
+    container_name: bird5
+    network_mode: "service:tinc5"
+    volumes:
+      - ./configs/bird:/etc/bird:ro
+    environment:
+      - BGP_AS=${BGP_AS:-65000}
+      - ROUTER_ID=192.0.2.5
+    restart: unless-stopped
+    depends_on:
+      - tinc5
+
+  daemon1:
+    build:
+      context: .
+      dockerfile: ./docker/go-daemon/Dockerfile
+    container_name: daemon1
+    network_mode: "service:tinc1"
+    volumes:
+      - tinc1-data:/var/run/tinc
+    environment:
+      - NODE_NAME=node1
+      - NODE_IP=10.0.0.1
+      - TINC_ENDPOINT=node1:655
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,etcd4:2379,etcd5:2379
+    command: ["/usr/local/bin/bgp-daemon", "-node=node1", "-tinc-net=bgpmesh", "-etcd=etcd1:2379", "-v"]
+    restart: unless-stopped
+    depends_on:
+      - tinc1
+      - etcd1
+
+  daemon2:
+    build:
+      context: .
+      dockerfile: ./docker/go-daemon/Dockerfile
+    container_name: daemon2
+    network_mode: "service:tinc2"
+    volumes:
+      - tinc2-data:/var/run/tinc
+    environment:
+      - NODE_NAME=node2
+      - NODE_IP=10.0.0.2
+      - TINC_ENDPOINT=node2:655
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,etcd4:2379,etcd5:2379
+    command: ["/usr/local/bin/bgp-daemon", "-node=node2", "-tinc-net=bgpmesh", "-etcd=etcd2:2379", "-v"]
+    restart: unless-stopped
+    depends_on:
+      - tinc2
+      - etcd2
+
+  daemon3:
+    build:
+      context: .
+      dockerfile: ./docker/go-daemon/Dockerfile
+    container_name: daemon3
+    network_mode: "service:tinc3"
+    volumes:
+      - tinc3-data:/var/run/tinc
+    environment:
+      - NODE_NAME=node3
+      - NODE_IP=10.0.0.3
+      - TINC_ENDPOINT=node3:655
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,etcd4:2379,etcd5:2379
+    command: ["/usr/local/bin/bgp-daemon", "-node=node3", "-tinc-net=bgpmesh", "-etcd=etcd3:2379", "-v"]
+    restart: unless-stopped
+    depends_on:
+      - tinc3
+      - etcd3
+
+  daemon4:
+    build:
+      context: .
+      dockerfile: ./docker/go-daemon/Dockerfile
+    container_name: daemon4
+    network_mode: "service:tinc4"
+    volumes:
+      - tinc4-data:/var/run/tinc
+    environment:
+      - NODE_NAME=node4
+      - NODE_IP=10.0.0.4
+      - TINC_ENDPOINT=node4:655
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,etcd4:2379,etcd5:2379
+    command: ["/usr/local/bin/bgp-daemon", "-node=node4", "-tinc-net=bgpmesh", "-etcd=etcd4:2379", "-v"]
+    restart: unless-stopped
+    depends_on:
+      - tinc4
+      - etcd4
+
+  daemon5:
+    build:
+      context: .
+      dockerfile: ./docker/go-daemon/Dockerfile
+    container_name: daemon5
+    network_mode: "service:tinc5"
+    volumes:
+      - tinc5-data:/var/run/tinc
+    environment:
+      - NODE_NAME=node5
+      - NODE_IP=10.0.0.5
+      - TINC_ENDPOINT=node5:655
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,etcd4:2379,etcd5:2379
+    command: ["/usr/local/bin/bgp-daemon", "-node=node5", "-tinc-net=bgpmesh", "-etcd=etcd5:2379", "-v"]
+    restart: unless-stopped
+    depends_on:
+      - tinc5
+      - etcd5
+
   tinc1:
     build: ./docker/tinc
     container_name: tinc1
@@ -53,6 +179,7 @@ services:
       - "179:179"  # BGP port (bird1 shares this network)
     volumes:
       - ./configs/tinc:/etc/tinc:ro
+      - tinc1-data:/var/run/tinc
     depends_on:
       - etcd1
     networks:
@@ -73,6 +200,7 @@ services:
       - /dev/net/tun
     volumes:
       - ./configs/tinc:/etc/tinc:ro
+      - tinc2-data:/var/run/tinc
     depends_on:
       - etcd1
     networks:
@@ -93,12 +221,59 @@ services:
       - /dev/net/tun
     volumes:
       - ./configs/tinc:/etc/tinc:ro
+      - tinc3-data:/var/run/tinc
     depends_on:
       - etcd1
     networks:
       - mesh-net
     environment:
       - TINC_NAME=node3
+      - TINC_PORT=${TINC_PORT:-655}
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+    restart: unless-stopped
+
+  tinc4:
+    build: ./docker/tinc
+    container_name: tinc4
+    hostname: tinc4
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "656:655/udp"
+    volumes:
+      - ./configs/tinc:/etc/tinc:ro
+      - tinc4-data:/var/run/tinc
+    depends_on:
+      - etcd1
+    networks:
+      - mesh-net
+    environment:
+      - TINC_NAME=node4
+      - TINC_PORT=${TINC_PORT:-655}
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+    restart: unless-stopped
+
+  tinc5:
+    build: ./docker/tinc
+    container_name: tinc5
+    hostname: tinc5
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "657:655/udp"
+    volumes:
+      - ./configs/tinc:/etc/tinc:ro
+      - tinc5-data:/var/run/tinc
+    depends_on:
+      - etcd1
+    networks:
+      - mesh-net
+    environment:
+      - TINC_NAME=node5
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
     restart: unless-stopped
@@ -115,7 +290,7 @@ services:
       - --advertise-client-urls=http://etcd1:2379
       - --listen-peer-urls=http://0.0.0.0:2380
       - --initial-advertise-peer-urls=http://etcd1:2380
-      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380,etcd4=http://etcd4:2380,etcd5=http://etcd5:2380
       - --initial-cluster-state=new
     ports:
       - "2379:2379"
@@ -139,7 +314,7 @@ services:
       - --advertise-client-urls=http://etcd2:2379
       - --listen-peer-urls=http://0.0.0.0:2380
       - --initial-advertise-peer-urls=http://etcd2:2380
-      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380,etcd4=http://etcd4:2380,etcd5=http://etcd5:2380
       - --initial-cluster-state=new
     volumes:
       - etcd2-data:/etcd-data
@@ -159,10 +334,50 @@ services:
       - --advertise-client-urls=http://etcd3:2379
       - --listen-peer-urls=http://0.0.0.0:2380
       - --initial-advertise-peer-urls=http://etcd3:2380
-      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380,etcd4=http://etcd4:2380,etcd5=http://etcd5:2380
       - --initial-cluster-state=new
     volumes:
       - etcd3-data:/etcd-data
+    networks:
+      - cluster-net
+    restart: unless-stopped
+
+  etcd4:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd4
+    hostname: etcd4
+    command:
+      - etcd
+      - --name=etcd4
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd4:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd4:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380,etcd4=http://etcd4:2380,etcd5=http://etcd5:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd4-data:/etcd-data
+    networks:
+      - cluster-net
+    restart: unless-stopped
+
+  etcd5:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd5
+    hostname: etcd5
+    command:
+      - etcd
+      - --name=etcd5
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd5:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd5:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380,etcd4=http://etcd4:2380,etcd5=http://etcd5:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd5-data:/etcd-data
     networks:
       - cluster-net
     restart: unless-stopped
@@ -176,6 +391,8 @@ services:
       - "3000:3000"
     volumes:
       - ./configs/prometheus:/etc/prometheus:ro
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/etc/grafana/dashboards:ro
     networks:
       - mesh-net
     restart: unless-stopped
@@ -194,3 +411,10 @@ volumes:
   etcd1-data:
   etcd2-data:
   etcd3-data:
+  etcd4-data:
+  etcd5-data:
+  tinc1-data:
+  tinc2-data:
+  tinc3-data:
+  tinc4-data:
+  tinc5-data:

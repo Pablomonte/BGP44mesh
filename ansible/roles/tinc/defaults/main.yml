@@ -1,0 +1,5 @@
+---
+tinc_netname: "bgpmesh"
+tinc_port: 655
+tinc_subnet_mask: 24
+tinc_mtu: 1400

@@ -24,30 +24,31 @@ echo ""
 TINC_DIR="/var/run/tinc/$TINC_NETNAME"
 mkdir -p "$TINC_DIR/hosts"
 
-# Generate RSA keys and host file if they don't exist
+# Generate RSA keys if they don't exist
 if [ ! -f "$TINC_DIR/rsa_key.priv" ]; then
     echo "Generating RSA 2048-bit keys..."
     cd "$TINC_DIR"
     # Generate keys using correct config path
     echo -e "\n\n" | tincd -c "$TINC_DIR" -K2048
     echo "✓ RSA keys generated"
+else
+    echo "✓ Using existing RSA keys"
+fi
 
-    # Create host file with public key
-    if [ -f "$TINC_DIR/rsa_key.pub" ]; then
-        # Use Docker service name for address resolution (tinc1, tinc2, tinc3)
-        CONTAINER_NAME="tinc$NODE_ID"
+# Always create host file (regenerate on each start)
+if [ -f "$TINC_DIR/rsa_key.pub" ]; then
+    echo "Creating host file..."
+    # Use Docker service name for address resolution (tinc1, tinc2, tinc3)
+    CONTAINER_NAME="tinc$NODE_ID"
 
-        cat > "$TINC_DIR/hosts/$TINC_NAME" << EOF
+    cat > "$TINC_DIR/hosts/$TINC_NAME" << EOF
 # Host configuration for $TINC_NAME
 Address = $CONTAINER_NAME
 Port = $TINC_PORT
 
 EOF
-        cat "$TINC_DIR/rsa_key.pub" >> "$TINC_DIR/hosts/$TINC_NAME"
-        echo "✓ Host file created (Address = $CONTAINER_NAME)"
-    fi
-else
-    echo "✓ Using existing RSA keys"
+    cat "$TINC_DIR/rsa_key.pub" >> "$TINC_DIR/hosts/$TINC_NAME"
+    echo "✓ Host file created (Address = $CONTAINER_NAME)"
 fi
 
 # Render TINC configuration from template

@@ -1,32 +1,60 @@
 ---
-# BIRD BGP daemon role
-# Sprint 1: Skeleton only (Docker deployment)
-# Sprint 2+: Full implementation for production
+- name: Install BIRD BGP daemon
+  apt:
+    name:
+      - bird2
+    state: present
+    update_cache: yes
 
-- name: Sprint 1 - BIRD deployment via Docker
-  debug:
-    msg: |
-      BIRD role (Sprint 1 skeleton)
-      ============================
-      In Sprint 1, BIRD is deployed via Docker Compose.
+- name: Create BIRD configuration directory
+  file:
+    path: /etc/bird
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
 
-      This role will be fully implemented in Sprint 2 for production deployment:
-      - Install BIRD 3.x from package/source
-      - Template configuration files
-      - Configure systemd service
-      - Setup BGP sessions
-      - Configure filters and policies
-      - Enable monitoring (bird_exporter)
+- name: Deploy BIRD main configuration
+  template:
+    src: bird.conf.j2
+    dest: /etc/bird/bird.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: 'bird -p -c %s'
+  notify: restart bird
 
-      Current deployment: docker-compose.yml
+- name: Create BIRD protocols configuration
+  template:
+    src: protocols.conf.j2
+    dest: /etc/bird/protocols.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart bird
 
-- name: Placeholder task to ensure valid playbook
-  set_fact:
-    bird_deployment_method: "{{ deployment_method | default('docker') }}"
+- name: Create BIRD systemd override directory
+  file:
+    path: /etc/systemd/system/bird.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
 
-- name: Display BIRD configuration
-  debug:
-    msg:
-      - "BGP AS: {{ bgp_as }}"
-      - "Router ID base: {{ router_id_base }}"
-      - "Deployment method: {{ bird_deployment_method }}"
+- name: Deploy BIRD systemd override
+  template:
+    src: bird-override.conf.j2
+    dest: /etc/systemd/system/bird.service.d/override.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart bird
+
+- name: Enable and start BIRD service
+  systemd:
+    name: bird
+    enabled: yes
+    state: started
+    daemon_reload: yes

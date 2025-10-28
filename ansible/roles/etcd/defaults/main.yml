@@ -1,0 +1,3 @@
+---
+etcd_version: "3.5.14"
+etcd_cluster_token: "bgp-mesh-cluster"

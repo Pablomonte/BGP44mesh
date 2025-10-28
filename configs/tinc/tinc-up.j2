@@ -12,7 +12,18 @@ ip addr add 10.0.0.{{ node_id }}/24 dev $INTERFACE
 ip -6 addr add 2001:db8::{{ node_id }}/64 dev $INTERFACE
 
 # Propagate to etcd for peer discovery
-# Store timestamp and node info
-etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} "$(date +%s)" || true
+# Read public key and store complete peer info
+if [ -f "/var/run/tinc/bgpmesh/rsa_key.pub" ]; then
+    # Read public key and escape for JSON (replace newlines with \n)
+    PUBLIC_KEY=$(cat /var/run/tinc/bgpmesh/rsa_key.pub | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+
+    # Store complete peer info in etcd
+    etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} \
+        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ tinc_name }}:655\",\"key\":\"$PUBLIC_KEY\"}" || true
+else
+    # Fallback: store minimal info if key not available yet
+    etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} \
+        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ tinc_name }}:655\"}" || true
+fi
 
 echo "TINC interface $INTERFACE configured: 10.0.0.{{ node_id }}/24, 2001:db8::{{ node_id }}/64"

@@ -1,0 +1,28 @@
+#!/bin/bash
+# TINC up script for {{ node_name }}
+
+# Bring up interface
+ip link set $INTERFACE up
+
+# Configure IPv4 address
+ip addr add {{ node_ip }}/{{ tinc_subnet_mask }} dev $INTERFACE
+
+# Configure IPv6 address (optional)
+{% if tinc_ipv6 is defined %}
+ip -6 addr add {{ tinc_ipv6 }}/64 dev $INTERFACE
+{% endif %}
+
+# Set MTU
+ip link set $INTERFACE mtu {{ tinc_mtu | default(1400) }}
+
+# Propagate node info to etcd
+if command -v etcdctl >/dev/null 2>&1; then
+    # Read public key and escape for JSON
+    if [ -f "/etc/tinc/{{ tinc_netname }}/rsa_key.pub" ]; then
+        PUBLIC_KEY=$(cat /etc/tinc/{{ tinc_netname }}/rsa_key.pub | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+        etcdctl put /peers/{{ node_name }} "{\"ip\":\"{{ node_ip }}\",\"endpoint\":\"{{ ansible_default_ipv4.address }}:{{ tinc_port }}\",\"key\":\"$PUBLIC_KEY\"}" --endpoints="{{ etcd_endpoints }}"
+    else
+        # Fallback: store without key if not available yet
+        etcdctl put /peers/{{ node_name }} "{\"ip\":\"{{ node_ip }}\",\"endpoint\":\"{{ ansible_default_ipv4.address }}:{{ tinc_port }}\"}" --endpoints="{{ etcd_endpoints }}"
+    fi
+fi

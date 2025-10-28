@@ -1,35 +1,94 @@
 ---
-# TINC VPN mesh role
-# Sprint 1: Skeleton only (Docker deployment)
-# Sprint 2+: Full implementation for production
+- name: Install TINC VPN
+  apt:
+    name:
+      - tinc
+    state: present
+    update_cache: yes
 
-- name: Sprint 1 - TINC deployment via Docker
-  debug:
-    msg: |
-      TINC role (Sprint 1 skeleton)
-      ============================
-      In Sprint 1, TINC is deployed via Docker Compose.
+- name: Create TINC network directory
+  file:
+    path: "/etc/tinc/{{ tinc_netname }}/hosts"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
 
-      This role will be fully implemented in Sprint 2 for production deployment:
-      - Install TINC 1.0 from package
-      - Generate RSA keys
-      - Distribute keys to peers
-      - Template tinc.conf, tinc-up, tinc-down
-      - Configure systemd service
-      - Setup mesh connectivity
-      - Integrate with etcd for peer discovery
+- name: Check if TINC keypair exists
+  stat:
+    path: "/etc/tinc/{{ tinc_netname }}/rsa_key.priv"
+  register: tinc_keypair
 
-      Current deployment: docker-compose.yml
+- name: Generate TINC RSA keypair
+  command: "tincd -n {{ tinc_netname }} -K4096"
+  args:
+    creates: "/etc/tinc/{{ tinc_netname }}/rsa_key.priv"
+  when: not tinc_keypair.stat.exists
+  environment:
+    TINC_HOST_NAME: "{{ node_name }}"
 
-- name: Placeholder task to ensure valid playbook
-  set_fact:
-    tinc_deployment_method: "{{ deployment_method | default('docker') }}"
+- name: Create TINC configuration
+  template:
+    src: tinc.conf.j2
+    dest: "/etc/tinc/{{ tinc_netname }}/tinc.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart tinc
 
-- name: Display TINC configuration
-  debug:
-    msg:
-      - "Network name: {{ tinc_netname }}"
-      - "Port: {{ tinc_port }}"
-      - "Mode: {{ tinc_mode }}"
-      - "Cipher: {{ tinc_cipher }}"
-      - "Deployment method: {{ tinc_deployment_method }}"
+- name: Create tinc-up script
+  template:
+    src: tinc-up.j2
+    dest: "/etc/tinc/{{ tinc_netname }}/tinc-up"
+    owner: root
+    group: root
+    mode: '0755'
+  notify: restart tinc
+
+- name: Create tinc-down script
+  template:
+    src: tinc-down.j2
+    dest: "/etc/tinc/{{ tinc_netname }}/tinc-down"
+    owner: root
+    group: root
+    mode: '0755'
+  notify: restart tinc
+
+- name: Create local host file
+  template:
+    src: host.j2
+    dest: "/etc/tinc/{{ tinc_netname }}/hosts/{{ node_name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart tinc
+
+- name: Read local public key
+  slurp:
+    src: "/etc/tinc/{{ tinc_netname }}/rsa_key.pub"
+  register: tinc_public_key
+  when: etcd_endpoints is defined
+
+- name: Store public key in etcd
+  command: >
+    etcdctl put /tinc/keys/{{ node_name }} "{{ tinc_public_key.content | b64decode }}"
+  environment:
+    ETCDCTL_ENDPOINTS: "{{ etcd_endpoints }}"
+  when: etcd_endpoints is defined and tinc_public_key is defined
+
+- name: Fetch peer host files from etcd
+  shell: |
+    for peer in $(etcdctl get /tinc/keys/ --prefix --keys-only | grep -v "{{ node_name }}"); do
+      peer_name=$(basename $peer)
+      etcdctl get /tinc/keys/$peer_name > /etc/tinc/{{ tinc_netname }}/hosts/$peer_name
+    done
+  environment:
+    ETCDCTL_ENDPOINTS: "{{ etcd_endpoints }}"
+  when: etcd_endpoints is defined
+  notify: restart tinc
+
+- name: Enable and start TINC service
+  systemd:
+    name: "tinc@{{ tinc_netname }}"
+    enabled: yes
+    state: started

@@ -1,24 +1,23 @@
 ---
-# Global variables for all hosts
+# Global variables for BGP network
 
-# TINC configuration
-tinc_netname: bgpmesh
+# TINC VPN settings
+tinc_netname: "bgpmesh"
 tinc_port: 655
-tinc_mode: switch
-tinc_cipher: aes-256-cbc
+tinc_subnet_mask: 24
+tinc_mtu: 1400
 
-# BGP configuration
+# BGP settings
 bgp_as: 65000
-router_id_base: 192.0.2
+bgp_bfd_enabled: false
 
-# etcd configuration
-etcd_cluster_token: bgp-etcd-cluster
-etcd_initial_cluster: "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380"
+# etcd cluster settings
+etcd_version: "3.5.14"
+etcd_cluster_token: "bgp-mesh-cluster"
 
 # Monitoring
 prometheus_port: 9090
 grafana_port: 3000
 
-# Deployment
-deployment_environment: development
-deployment_method: docker  # docker|systemd|native
+# Node-specific settings (will be overridden by host_vars)
+node_name: "{{ inventory_hostname }}"

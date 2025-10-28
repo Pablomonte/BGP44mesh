@@ -1,0 +1,3 @@
+---
+bgp_as: 65000
+bgp_bfd_enabled: false

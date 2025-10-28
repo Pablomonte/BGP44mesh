@@ -69,11 +69,11 @@ docker exec -it bird1 /bin/bash               # Interactive shell
 
 ```
 BGP/
-├── docker-compose.yml          # 9 services (3 bird + 3 tinc + 3 etcd + monitoring)
+├── docker-compose.yml          # 15 services (5 bird + 5 tinc + 5 etcd + monitoring)
 ├── Makefile                    # Build/deploy automation
 ├── configs/                    # BIRD/TINC templates (Jinja2)
 ├── docker/                     # Container builds
-├── ansible/                    # Infrastructure orchestration
+├── ansible/                    # Infrastructure orchestration (4 roles)
 ├── daemon-go/                  # Custom Go propagation daemon
 ├── tests/                      # Validation, integration, E2E tests
 └── docs/                       # Documentation
@@ -121,10 +121,35 @@ docker restart bird1 bird2 bird3
 - etcd: <10ms quorum reads
 - TINC: <50ms overhead vs direct
 
-## Sprint Roadmap
+## Sprint Status
 
-- **Sprint 1** (current): Local 3-node MVP, Docker orchestration, basic tests
-- **Sprint 2**: Automation (mDNS discovery, key distribution, Ansible roles)
+### Sprint 2 Phase 1 (Completed 2025-10-28)
+
+- **Testing**: Makefile (20+ targets), CI coverage enforcement
+  - pkg/tinc: 92.7% coverage (11 test functions)
+  - pkg/discovery: 89.8% coverage (9 test functions)
+  - pkg/types: 100% coverage
+- **Scaling**: 5-node Docker deployment (15 containers, etcd quorum)
+- **Automation**: 4 Ansible roles (etcd, tinc, bird, bgp-daemon)
+- **Docs**: Testing guide, Deployment guide, Status report
+
+**Commands**:
+```bash
+cd daemon-go && make test-coverage  # Run tests with coverage
+cd daemon-go && make test-unit      # Fast tests (skip integration)
+make deploy-local                    # Docker 5-node
+cd ansible && ansible-playbook -i inventory/hosts.ini playbook.yml  # Ansible
+```
+
+**Next**: Sprint 2 Phase 2 (custom Grafana dashboards, additional integration tests)
+
+### Sprint 1 (Completed)
+
+Local 3-node MVP, Docker orchestration, basic tests, Grafana monitoring
+
+### Roadmap
+
+- **Sprint 2 Phase 2**: Unit tests completion, custom Grafana dashboards
 - **Sprint 3**: Production hardening (rolling updates, chaos testing)
 - **Sprint 4**: Scalability (route reflectors, RPKI, multi-region)
 

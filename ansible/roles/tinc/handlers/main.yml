@@ -1,0 +1,5 @@
+---
+- name: restart tinc
+  systemd:
+    name: "tinc@{{ tinc_netname }}"
+    state: restarted

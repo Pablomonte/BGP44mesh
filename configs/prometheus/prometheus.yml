@@ -24,6 +24,8 @@ scrape_configs:
           - 'bird1:9324'
           - 'bird2:9324'
           - 'bird3:9324'
+          - 'bird4:9324'
+          - 'bird5:9324'
         labels:
           service: 'bird'
           protocol: 'bgp'
@@ -35,6 +37,8 @@ scrape_configs:
           - 'tinc1:9100'
           - 'tinc2:9100'
           - 'tinc3:9100'
+          - 'tinc4:9100'
+          - 'tinc5:9100'
         labels:
           service: 'tinc'
           protocol: 'vpn'
@@ -46,9 +50,27 @@ scrape_configs:
           - 'etcd1:2379'
           - 'etcd2:2379'
           - 'etcd3:2379'
+          - 'etcd4:2379'
+          - 'etcd5:2379'
         labels:
           service: 'etcd'
           protocol: 'kvstore'
+    metrics_path: '/metrics'
+
+  # BGP daemon (Go) metrics
+  # Note: daemons share network namespace with tinc containers
+  - job_name: 'bgp-daemon'
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 'tinc1:2112'
+          - 'tinc2:2112'
+          - 'tinc3:2112'
+          - 'tinc4:2112'
+          - 'tinc5:2112'
+        labels:
+          service: 'bgp-daemon'
+          component: 'automation'
     metrics_path: '/metrics'
 
 # Alerting configuration (placeholder for Sprint 2)

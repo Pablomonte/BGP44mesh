@@ -1,0 +1,19 @@
+# BGP peer configurations for {{ node_name }}
+
+{% for peer in bgp_peers %}
+protocol bgp {{ peer.name }} {
+    description "BGP peer {{ peer.name }} at {{ peer.ip }}";
+    local {{ node_ip }} as {{ bgp_as }};
+    neighbor {{ peer.ip }} as {{ bgp_as }};
+
+    ipv4 {
+        import all;
+        export all;
+    };
+
+    {% if bgp_bfd_enabled | default(false) %}
+    bfd on;
+    {% endif %}
+}
+
+{% endfor %}

@@ -58,23 +58,61 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23'
 
       - name: Download dependencies
         working-directory: ./daemon-go
-        run: go mod download
+        run: make deps
 
       - name: Run go vet
         working-directory: ./daemon-go
-        run: go vet ./...
+        run: make vet
 
-      - name: Run go test
+      - name: Run go fmt check
         working-directory: ./daemon-go
-        run: go test ./...
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "Code is not formatted:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Run unit tests
+        working-directory: ./daemon-go
+        run: make test-unit
+
+      - name: Run race detector
+        working-directory: ./daemon-go
+        run: make test-race
+
+      - name: Run tests with coverage
+        working-directory: ./daemon-go
+        run: make test-coverage
+
+      - name: Check coverage threshold
+        working-directory: ./daemon-go
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Current coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+            echo "⚠️  Coverage ${COVERAGE}% is below threshold 70%"
+            echo "This is expected in Sprint 2 Phase 1 as pkg/tinc and pkg/discovery tests are pending"
+            echo "Target for Phase 2: >70%"
+          else
+            echo "✅ Coverage ${COVERAGE}% meets or exceeds threshold 70%"
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        continue-on-error: true
+        with:
+          file: ./daemon-go/coverage.out
+          flags: unittests
+          fail_ci_if_error: false
 
       - name: Build daemon
         working-directory: ./daemon-go
-        run: go build -o bgp-daemon ./cmd/bgp-daemon
+        run: make build
 
   integration:
     name: Integration Tests

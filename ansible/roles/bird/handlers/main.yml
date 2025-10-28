@@ -1,0 +1,14 @@
+---
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart bird
+  systemd:
+    name: bird
+    state: restarted
+
+- name: reload bird
+  systemd:
+    name: bird
+    state: reloaded

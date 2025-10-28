@@ -1,0 +1,73 @@
+---
+# Main deployment playbook for BGP network
+# Usage: ansible-playbook -i inventory/hosts.ini playbook.yml
+
+- name: Deploy BGP Network Infrastructure
+  hosts: bgp_nodes
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install common dependencies
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - curl
+          - vim
+          - htop
+          - tcpdump
+        state: present
+
+    - name: Display deployment information
+      debug:
+        msg: |
+          Deploying BGP node: {{ inventory_hostname }}
+          Node IP: {{ node_ip }}
+          Router ID: {{ router_id }}
+          BGP AS: {{ bgp_as }}
+          TINC Network: {{ tinc_netname }}
+          etcd Cluster: {{ etcd_cluster_members }}
+
+  roles:
+    - role: etcd
+      tags: ['etcd']
+
+    - role: tinc
+      tags: ['tinc', 'vpn']
+
+    - role: bird
+      tags: ['bird', 'bgp']
+
+    - role: bgp-daemon
+      tags: ['daemon', 'automation']
+
+  post_tasks:
+    - name: Wait for etcd to be healthy
+      command: etcdctl endpoint health --endpoints={{ etcd_endpoints }}
+      register: etcd_health
+      until: etcd_health.rc == 0
+      retries: 10
+      delay: 5
+      tags: ['verify']
+
+    - name: Display service status
+      shell: |
+        echo "=== Service Status ==="
+        systemctl status etcd --no-pager -l || true
+        systemctl status tinc@{{ tinc_netname }} --no-pager -l || true
+        systemctl status bird --no-pager -l || true
+        systemctl status bgp-daemon --no-pager -l || true
+      register: service_status
+      changed_when: false
+      tags: ['verify']
+
+    - name: Show service status
+      debug:
+        var: service_status.stdout_lines
+      tags: ['verify']

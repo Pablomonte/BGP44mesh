@@ -24,7 +24,7 @@ func LookupPeers(iface string) ([]types.Peer, error) {
 		defer close(entries)
 
 		params := &mdns.QueryParam{
-			Service: "_bgp._tcp",
+			Service: "_bgp-node._tcp",
 			Domain:  "local",
 			Timeout: 5 * time.Second,
 			Entries: entries,
@@ -72,8 +72,85 @@ func LookupPeers(iface string) ([]types.Peer, error) {
 	}
 }
 
-// TODO Sprint 2: Implement AdvertiseService for mDNS service registration
-// func AdvertiseService(iface string, port int, key string) error
+// AdvertiseService broadcasts this node's BGP service via mDNS
+// Advertises on _bgp-node._tcp.local with node info
+func AdvertiseService(nodeName string, port int, keyFingerprint string) (*mdns.Server, error) {
+	// Create service info
+	info := []string{
+		fmt.Sprintf("key=%s", keyFingerprint),
+		fmt.Sprintf("version=1.0"),
+	}
 
-// TODO Sprint 2: Implement continuous peer monitoring
-// func MonitorPeers(iface string, callback func([]Peer)) error
+	// Define service
+	service, err := mdns.NewMDNSService(
+		nodeName,           // Instance name (e.g., "node1")
+		"_bgp-node._tcp",   // Service type
+		"",                 // Domain (empty = .local)
+		"",                 // Host name (empty = use hostname)
+		port,               // Port
+		nil,                // IPs (nil = use all interfaces)
+		info,               // TXT records
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mDNS service: %w", err)
+	}
+
+	// Start mDNS server
+	server, err := mdns.NewServer(&mdns.Config{Zone: service})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start mDNS server: %w", err)
+	}
+
+	return server, nil
+}
+
+// MonitorPeers continuously discovers peers and calls callback on changes
+// Runs until context is cancelled
+func MonitorPeers(ctx context.Context, iface string, interval time.Duration, callback func([]types.Peer)) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var lastPeers []types.Peer
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-ticker.C:
+			// Discover current peers
+			peers, err := LookupPeers(iface)
+			if err != nil {
+				// Log error but continue monitoring
+				continue
+			}
+
+			// Check if peers changed
+			if !peersEqual(peers, lastPeers) {
+				callback(peers)
+				lastPeers = peers
+			}
+		}
+	}
+}
+
+// peersEqual compares two peer lists for equality
+func peersEqual(a, b []types.Peer) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create map for O(n) comparison
+	aMap := make(map[string]bool)
+	for _, peer := range a {
+		aMap[peer.Endpoint] = true
+	}
+
+	for _, peer := range b {
+		if !aMap[peer.Endpoint] {
+			return false
+		}
+	}
+
+	return true
+}
