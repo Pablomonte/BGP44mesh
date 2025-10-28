@@ -238,13 +238,29 @@ func main() {
 		}
 
 		// Reload TINC daemon
+		reloadFailed := false
 		if syncedCount > 0 {
 			log.Println("Reloading TINC daemon...")
 			if err := tincManager.Reload(); err != nil {
 				log.Printf("⚠ Failed initial TINC reload: %v", err)
+				log.Println("  (Will retry after TINC startup)")
+				reloadFailed = true
 			} else {
 				log.Println("✓ TINC daemon reloaded with peers")
 			}
+		}
+
+		// If initial reload failed, retry after TINC has had time to start
+		if reloadFailed {
+			go func() {
+				time.Sleep(10 * time.Second)
+				log.Println("Retrying TINC reload...")
+				if err := tincManager.Reload(); err != nil {
+					log.Printf("⚠ Retry reload failed: %v", err)
+				} else {
+					log.Println("✓ TINC daemon reloaded successfully on retry")
+				}
+			}()
 		}
 	}
 
