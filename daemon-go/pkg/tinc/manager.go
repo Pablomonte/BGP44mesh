@@ -86,12 +86,20 @@ func (m *Manager) RemoveHostFile(nodeName string) error {
 }
 
 // Reload triggers TINC daemon to reload configuration
+// In containerized environments, tincd runs in foreground mode (PID 1)
+// so we send SIGHUP directly instead of using tincd -kHUP
 func (m *Manager) Reload() error {
-	cmd := exec.Command("tincd", "-n", m.netName, "-kHUP")
+	// Try sending SIGHUP to PID 1 (works for Docker containers where tincd is foreground)
+	cmd := exec.Command("kill", "-HUP", "1")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to reload tincd: %w (output: %s)", err, string(output))
+		// If kill fails, fall back to traditional tincd reload command
+		cmd = exec.Command("tincd", "-n", m.netName, "-kHUP")
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to reload tincd: %w (output: %s)", err, string(output))
+		}
 	}
 
 	return nil
