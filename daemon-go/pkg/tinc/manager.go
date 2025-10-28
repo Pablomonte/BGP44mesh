@@ -52,13 +52,19 @@ func (m *Manager) SyncHostFile(peer types.Peer) error {
 		keyData = string(decoded)
 	}
 
+	// Extract address from endpoint (remove port if present)
+	address := peer.Endpoint
+	if idx := strings.Index(peer.Endpoint, ":"); idx != -1 {
+		address = peer.Endpoint[:idx]
+	}
+
 	// Create host file content
 	content := fmt.Sprintf(`# Host configuration for %s
 Address = %s
 Port = 655
 
 %s
-`, nodeName, peer.IP.String(), keyData)
+`, nodeName, address, keyData)
 
 	// Write host file
 	if err := os.WriteFile(hostFilePath, []byte(content), 0644); err != nil {

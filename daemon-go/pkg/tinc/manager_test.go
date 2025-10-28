@@ -99,7 +99,14 @@ func TestSyncHostFile(t *testing.T) {
 			// Verify file content
 			content, err := os.ReadFile(hostFile)
 			require.NoError(t, err)
-			assert.Contains(t, string(content), tt.peer.IP.String())
+
+			// Extract expected address from endpoint (hostname without port)
+			expectedAddr := tt.peer.Endpoint
+			if idx := strings.Index(tt.peer.Endpoint, ":"); idx != -1 {
+				expectedAddr = tt.peer.Endpoint[:idx]
+			}
+
+			assert.Contains(t, string(content), expectedAddr)
 			assert.Contains(t, string(content), "Port = 655")
 		})
 	}
