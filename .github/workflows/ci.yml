@@ -140,6 +140,8 @@ jobs:
         run: |
           echo "=== Docker PS ==="
           docker ps -a
+          echo "=== DAEMON1 Logs ==="
+          docker logs daemon1 || true
           echo "=== BIRD1 Logs ==="
           docker logs bird1 || true
           echo "=== TINC1 Logs ==="

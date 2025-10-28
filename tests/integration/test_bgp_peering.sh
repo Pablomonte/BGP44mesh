@@ -19,10 +19,12 @@ sleep 30
 
 # Check BGP sessions
 echo "Testing BGP sessions..."
-BIRD1_STATUS=$(docker exec bird1 birdc show protocols 2>/dev/null | grep -c "peer[0-9].*Established" || echo 0)
+BIRD1_STATUS=$(docker exec bird1 birdc show protocols 2>/dev/null | grep -c "peer[0-9].*Established" 2>/dev/null || echo "0")
+# Ensure it's a single number
+BIRD1_STATUS=$(echo "$BIRD1_STATUS" | head -n 1 | tr -d '[:space:]')
 echo "  BIRD1 established sessions: $BIRD1_STATUS"
 
-if [ "$BIRD1_STATUS" -ge 1 ]; then
+if [ "$BIRD1_STATUS" -ge 1 ] 2>/dev/null; then
     echo "✓ BGP sessions established"
 else
     echo "✗ No BGP sessions established"
