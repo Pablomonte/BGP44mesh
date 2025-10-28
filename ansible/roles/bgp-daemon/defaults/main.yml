@@ -1,0 +1,2 @@
+---
+bgp_daemon_binary_path: "../daemon-go/bin/bgp-daemon"

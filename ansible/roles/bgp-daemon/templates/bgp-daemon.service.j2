@@ -1,0 +1,33 @@
+[Unit]
+Description=BGP Propagation Daemon
+Documentation=https://github.com/pablomonte/bgp-network
+After=network.target etcd.service tinc@{{ tinc_netname }}.service
+Requires=etcd.service tinc@{{ tinc_netname }}.service
+
+[Service]
+Type=simple
+User=bgp-daemon
+Group=bgp-daemon
+EnvironmentFile=/etc/bgp-daemon/daemon.env
+ExecStart=/opt/bgp-daemon/bgp-daemon \
+    -node={{ node_name }} \
+    -tinc-net={{ tinc_netname }} \
+    -etcd={{ etcd_endpoints }} \
+    -iface=tinc0 \
+    -metrics-addr=:2112 \
+    -v
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bgp-daemon
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/run/tinc
+
+[Install]
+WantedBy=multi-user.target

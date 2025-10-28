@@ -1,0 +1,55 @@
+---
+- name: Create bgp-daemon user
+  user:
+    name: bgp-daemon
+    system: yes
+    create_home: no
+    shell: /usr/sbin/nologin
+
+- name: Create bgp-daemon directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: bgp-daemon
+    group: bgp-daemon
+    mode: '0755'
+  loop:
+    - /opt/bgp-daemon
+    - /etc/bgp-daemon
+    - /var/log/bgp-daemon
+
+- name: Copy bgp-daemon binary
+  copy:
+    src: "{{ bgp_daemon_binary_path | default('../daemon-go/bin/bgp-daemon') }}"
+    dest: /opt/bgp-daemon/bgp-daemon
+    owner: bgp-daemon
+    group: bgp-daemon
+    mode: '0755'
+  notify: restart bgp-daemon
+
+- name: Create bgp-daemon environment file
+  template:
+    src: bgp-daemon.env.j2
+    dest: /etc/bgp-daemon/daemon.env
+    owner: bgp-daemon
+    group: bgp-daemon
+    mode: '0600'
+  notify: restart bgp-daemon
+
+- name: Create bgp-daemon systemd service
+  template:
+    src: bgp-daemon.service.j2
+    dest: /etc/systemd/system/bgp-daemon.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart bgp-daemon
+
+- name: Enable and start bgp-daemon service
+  systemd:
+    name: bgp-daemon
+    enabled: yes
+    state: started
+    daemon_reload: yes

@@ -1,8 +1,9 @@
 # Go
 *.o
-bgp-daemon
-/vendor/
+/bgp-daemon
 /daemon-go/bgp-daemon
+/daemon-go/bin/
+/vendor/
 
 # Environment
 .env
