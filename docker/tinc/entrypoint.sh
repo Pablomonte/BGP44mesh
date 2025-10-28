@@ -51,8 +51,8 @@ EOF
     echo "✓ Host file created (Address = $CONTAINER_NAME)"
 fi
 
-# Render TINC configuration from template
-if [ -f /etc/tinc/tinc.conf.j2 ]; then
+# Render TINC configuration from template (only if it doesn't exist)
+if [ -f /etc/tinc/tinc.conf.j2 ] && [ ! -f "$TINC_DIR/tinc.conf" ]; then
     echo ""
     echo "Rendering tinc.conf from template..."
     python3 << EOF
@@ -68,14 +68,11 @@ with open('$TINC_DIR/tinc.conf', 'w') as f:
 EOF
     echo "✓ tinc.conf rendered"
 
-    # Add ConnectTo directives for full mesh (Sprint 1: hardcoded for 3 nodes)
-    echo "Adding ConnectTo directives for mesh..."
-    for i in 1 2 3; do
-        if [ "node$i" != "$TINC_NAME" ]; then
-            echo "ConnectTo = node$i" >> "$TINC_DIR/tinc.conf"
-        fi
-    done
-    echo "✓ ConnectTo directives added"
+    # Add placeholder for ConnectTo (daemon will manage them)
+    echo "# ConnectTo directives will be managed by bgp-daemon" >> "$TINC_DIR/tinc.conf"
+    echo "✓ Placeholder added (daemon will manage ConnectTo)"
+elif [ -f "$TINC_DIR/tinc.conf" ]; then
+    echo "✓ Using existing tinc.conf (managed by daemon)"
 fi
 
 # Render tinc-up script
