@@ -1,0 +1,32 @@
+---
+# BIRD BGP daemon role
+# Sprint 1: Skeleton only (Docker deployment)
+# Sprint 2+: Full implementation for production
+
+- name: Sprint 1 - BIRD deployment via Docker
+  debug:
+    msg: |
+      BIRD role (Sprint 1 skeleton)
+      ============================
+      In Sprint 1, BIRD is deployed via Docker Compose.
+
+      This role will be fully implemented in Sprint 2 for production deployment:
+      - Install BIRD 3.x from package/source
+      - Template configuration files
+      - Configure systemd service
+      - Setup BGP sessions
+      - Configure filters and policies
+      - Enable monitoring (bird_exporter)
+
+      Current deployment: docker-compose.yml
+
+- name: Placeholder task to ensure valid playbook
+  set_fact:
+    bird_deployment_method: "{{ deployment_method | default('docker') }}"
+
+- name: Display BIRD configuration
+  debug:
+    msg:
+      - "BGP AS: {{ bgp_as }}"
+      - "Router ID base: {{ router_id_base }}"
+      - "Deployment method: {{ bird_deployment_method }}"

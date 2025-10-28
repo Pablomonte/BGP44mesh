@@ -1,0 +1,11 @@
+#!/bin/sh
+# TINC interface down script
+# Executed when TINC interface is brought down
+
+# Remove from etcd
+etcdctl --endpoints=http://etcd1:2379 del /peers/{{ tinc_name }} || true
+
+# Bring interface down
+ip link set $INTERFACE down
+
+echo "TINC interface $INTERFACE brought down and removed from etcd"

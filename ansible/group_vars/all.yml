@@ -1,0 +1,24 @@
+---
+# Global variables for all hosts
+
+# TINC configuration
+tinc_netname: bgpmesh
+tinc_port: 655
+tinc_mode: switch
+tinc_cipher: aes-256-cbc
+
+# BGP configuration
+bgp_as: 65000
+router_id_base: 192.0.2
+
+# etcd configuration
+etcd_cluster_token: bgp-etcd-cluster
+etcd_initial_cluster: "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380"
+
+# Monitoring
+prometheus_port: 9090
+grafana_port: 3000
+
+# Deployment
+deployment_environment: development
+deployment_method: docker  # docker|systemd|native

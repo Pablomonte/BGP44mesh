@@ -1,0 +1,32 @@
+# Go
+*.o
+bgp-daemon
+/vendor/
+/daemon-go/bgp-daemon
+
+# Environment
+.env
+
+# Docker
+/build/
+*.log
+/tmp/
+
+# etcd data
+/etcd/data/
+
+# TINC keys (generated)
+/configs/tinc/*/rsa_key.priv
+rsa_key.priv
+hosts/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

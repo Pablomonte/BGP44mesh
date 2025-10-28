@@ -1,0 +1,26 @@
+---
+# Main playbook for BGP network configuration
+# Sprint 1: Skeleton only (using Docker)
+# Sprint 2+: Full implementation for production deployment
+
+- name: Configure BGP network nodes
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  roles:
+    - bird
+    - tinc
+
+  tasks:
+    - name: Display deployment info
+      debug:
+        msg: |
+          BGP Network Configuration
+          =========================
+          Host: {{ inventory_hostname }}
+          BGP AS: {{ bgp_as }}
+          TINC Network: {{ tinc_netname }}
+
+          Note: Sprint 1 uses Docker containers.
+          Full Ansible deployment coming in Sprint 2.

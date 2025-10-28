@@ -1,0 +1,62 @@
+# Prometheus Configuration
+# Global settings and scrape configs for BGP network monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'bgp-local-dev'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # BIRD BGP daemon metrics (via bird_exporter if available)
+  - job_name: 'bird'
+    static_configs:
+      - targets:
+          - 'bird1:9324'
+          - 'bird2:9324'
+          - 'bird3:9324'
+        labels:
+          service: 'bird'
+          protocol: 'bgp'
+
+  # TINC mesh metrics (custom exporter or node_exporter)
+  - job_name: 'tinc'
+    static_configs:
+      - targets:
+          - 'tinc1:9100'
+          - 'tinc2:9100'
+          - 'tinc3:9100'
+        labels:
+          service: 'tinc'
+          protocol: 'vpn'
+
+  # etcd cluster metrics
+  - job_name: 'etcd'
+    static_configs:
+      - targets:
+          - 'etcd1:2379'
+          - 'etcd2:2379'
+          - 'etcd3:2379'
+        labels:
+          service: 'etcd'
+          protocol: 'kvstore'
+    metrics_path: '/metrics'
+
+# Alerting configuration (placeholder for Sprint 2)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# Rule files (placeholder for Sprint 2)
+# rule_files:
+#   - '/etc/prometheus/rules/*.yml'

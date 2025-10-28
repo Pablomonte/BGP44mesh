@@ -1,0 +1,35 @@
+---
+# TINC VPN mesh role
+# Sprint 1: Skeleton only (Docker deployment)
+# Sprint 2+: Full implementation for production
+
+- name: Sprint 1 - TINC deployment via Docker
+  debug:
+    msg: |
+      TINC role (Sprint 1 skeleton)
+      ============================
+      In Sprint 1, TINC is deployed via Docker Compose.
+
+      This role will be fully implemented in Sprint 2 for production deployment:
+      - Install TINC 1.0 from package
+      - Generate RSA keys
+      - Distribute keys to peers
+      - Template tinc.conf, tinc-up, tinc-down
+      - Configure systemd service
+      - Setup mesh connectivity
+      - Integrate with etcd for peer discovery
+
+      Current deployment: docker-compose.yml
+
+- name: Placeholder task to ensure valid playbook
+  set_fact:
+    tinc_deployment_method: "{{ deployment_method | default('docker') }}"
+
+- name: Display TINC configuration
+  debug:
+    msg:
+      - "Network name: {{ tinc_netname }}"
+      - "Port: {{ tinc_port }}"
+      - "Mode: {{ tinc_mode }}"
+      - "Cipher: {{ tinc_cipher }}"
+      - "Deployment method: {{ tinc_deployment_method }}"

@@ -1,0 +1,197 @@
+version: '3.8'
+
+services:
+  bird1:
+    build: ./docker/bird
+    container_name: bird1
+    hostname: bird1
+    ports:
+      - "179:179"
+    volumes:
+      - ./configs/bird:/etc/bird:ro
+    networks:
+      - mesh-net
+    environment:
+      - BGP_AS=${BGP_AS:-65000}
+      - ROUTER_ID=192.0.2.1
+    restart: unless-stopped
+
+  bird2:
+    build: ./docker/bird
+    container_name: bird2
+    hostname: bird2
+    volumes:
+      - ./configs/bird:/etc/bird:ro
+    networks:
+      - mesh-net
+    environment:
+      - BGP_AS=${BGP_AS:-65000}
+      - ROUTER_ID=192.0.2.2
+    restart: unless-stopped
+
+  bird3:
+    build: ./docker/bird
+    container_name: bird3
+    hostname: bird3
+    volumes:
+      - ./configs/bird:/etc/bird:ro
+    networks:
+      - mesh-net
+    environment:
+      - BGP_AS=${BGP_AS:-65000}
+      - ROUTER_ID=192.0.2.3
+    restart: unless-stopped
+
+  tinc1:
+    build: ./docker/tinc
+    container_name: tinc1
+    hostname: tinc1
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "655:655/udp"
+    volumes:
+      - ./configs/tinc:/etc/tinc:ro
+    depends_on:
+      - etcd1
+    networks:
+      - mesh-net
+    environment:
+      - TINC_NAME=node1
+      - TINC_PORT=${TINC_PORT:-655}
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+    restart: unless-stopped
+
+  tinc2:
+    build: ./docker/tinc
+    container_name: tinc2
+    hostname: tinc2
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    volumes:
+      - ./configs/tinc:/etc/tinc:ro
+    depends_on:
+      - etcd1
+    networks:
+      - mesh-net
+    environment:
+      - TINC_NAME=node2
+      - TINC_PORT=${TINC_PORT:-655}
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+    restart: unless-stopped
+
+  tinc3:
+    build: ./docker/tinc
+    container_name: tinc3
+    hostname: tinc3
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    volumes:
+      - ./configs/tinc:/etc/tinc:ro
+    depends_on:
+      - etcd1
+    networks:
+      - mesh-net
+    environment:
+      - TINC_NAME=node3
+      - TINC_PORT=${TINC_PORT:-655}
+      - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+    restart: unless-stopped
+
+  etcd1:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd1
+    hostname: etcd1
+    command:
+      - etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - etcd1-data:/etcd-data
+    networks:
+      - cluster-net
+      - mesh-net
+    restart: unless-stopped
+
+  etcd2:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd2
+    hostname: etcd2
+    command:
+      - etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd2-data:/etcd-data
+    networks:
+      - cluster-net
+    restart: unless-stopped
+
+  etcd3:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd3
+    hostname: etcd3
+    command:
+      - etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd3-data:/etcd-data
+    networks:
+      - cluster-net
+    restart: unless-stopped
+
+  prometheus:
+    build: ./docker/monitoring
+    container_name: prometheus
+    hostname: prometheus
+    ports:
+      - "9090:9090"
+      - "3000:3000"
+    volumes:
+      - ./configs/prometheus:/etc/prometheus:ro
+    networks:
+      - mesh-net
+    restart: unless-stopped
+
+networks:
+  mesh-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  cluster-net:
+    driver: bridge
+    internal: true
+
+volumes:
+  etcd1-data:
+  etcd2-data:
+  etcd3-data:

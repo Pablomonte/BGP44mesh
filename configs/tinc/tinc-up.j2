@@ -1,0 +1,18 @@
+#!/bin/sh
+# TINC interface up script
+# Executed when TINC interface is brought up
+
+# Set interface up with reduced MTU (TINC overhead)
+ip link set $INTERFACE up mtu 1400
+
+# Configure IPv4 address
+ip addr add 10.0.0.{{ node_id }}/24 dev $INTERFACE
+
+# Configure IPv6 address
+ip -6 addr add 2001:db8::{{ node_id }}/64 dev $INTERFACE
+
+# Propagate to etcd for peer discovery
+# Store timestamp and node info
+etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} "$(date +%s)" || true
+
+echo "TINC interface $INTERFACE configured: 10.0.0.{{ node_id }}/24, 2001:db8::{{ node_id }}/64"

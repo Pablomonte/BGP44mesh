@@ -1,0 +1,33 @@
+# BIRD 3.x Configuration
+# Generated from template
+
+router id {{ router_id }};
+
+log syslog all;
+debug protocols all;
+
+# Device protocol for interface tracking
+protocol device {
+}
+
+# Kernel protocol for route synchronization
+protocol kernel {
+    ipv4 {
+        import all;
+        export all;
+    };
+    ipv6 {
+        import all;
+        export all;
+    };
+}
+
+# Static routes protocol
+protocol static {
+    ipv4;
+    ipv6;
+}
+
+# Include additional configurations
+include "/etc/bird/protocols.conf";
+include "/etc/bird/filters.conf";

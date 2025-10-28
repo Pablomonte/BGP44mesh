@@ -1,0 +1,15 @@
+# TINC 1.0 Configuration
+# Generated from template
+
+Name = {{ tinc_name }}
+Mode = switch
+Cipher = aes-256-cbc
+Digest = sha256
+Port = {{ tinc_port }}
+Interface = tinc0
+
+# Compression (optional, can add overhead)
+# Compression = 9
+
+# Forwarding
+# DeviceType = tun
