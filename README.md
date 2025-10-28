@@ -36,6 +36,35 @@ make clean
 
 See [QUICKSTART.md](docs/QUICKSTART.md) for detailed instructions.
 
+## Common Commands
+
+```bash
+# Container status
+make status
+docker ps
+
+# BIRD (BGP routing)
+docker exec bird1 birdc show protocols        # All protocols
+docker exec bird1 birdc show protocols all peer1  # Peer detail
+docker exec bird1 birdc show route            # Routing table
+
+# TINC (VPN mesh)
+docker exec tinc1 ip addr show tinc0          # Interface status
+
+# etcd (distributed storage)
+docker exec etcd1 etcdctl member list         # Cluster members
+docker exec etcd1 etcdctl endpoint health     # Cluster health
+docker exec etcd1 etcdctl put /key "value"    # Write
+docker exec etcd1 etcdctl get /key            # Read
+
+# Logs
+docker logs -f bird1                          # Follow logs
+docker compose logs bird1 bird2 bird3         # Multiple services
+
+# Access containers
+docker exec -it bird1 /bin/bash               # Interactive shell
+```
+
 ## Project Structure
 
 ```
