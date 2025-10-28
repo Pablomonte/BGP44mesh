@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	defaultTincDir  = "/var/run/tinc"
-	defaultNetName  = "bgpmesh"
-	hostsSubdir     = "hosts"
+	defaultTincDir = "/var/run/tinc"
+	defaultNetName = "bgpmesh"
+	hostsSubdir    = "hosts"
 )
 
 // Manager handles TINC configuration and operations
 type Manager struct {
-	netName string
-	baseDir string
+	netName  string
+	baseDir  string
 	hostsDir string
 }
 

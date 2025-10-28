@@ -36,10 +36,10 @@ func TestTincReloadDuration_Registration(t *testing.T) {
 
 func TestTincReloadDuration_Buckets(t *testing.T) {
 	// Observe some values
-	TincReloadDuration.Observe(0.001)  // 1ms
-	TincReloadDuration.Observe(0.010)  // 10ms
-	TincReloadDuration.Observe(0.100)  // 100ms
-	TincReloadDuration.Observe(0.500)  // 500ms
+	TincReloadDuration.Observe(0.001) // 1ms
+	TincReloadDuration.Observe(0.010) // 10ms
+	TincReloadDuration.Observe(0.100) // 100ms
+	TincReloadDuration.Observe(0.500) // 500ms
 
 	// For histograms, just verify it doesn't panic
 	// Actual bucket validation would require exporting and parsing the metric
@@ -86,9 +86,9 @@ func TestHostFileSyncDuration_Registration(t *testing.T) {
 
 func TestHostFileSyncDuration_Observe(t *testing.T) {
 	// Observe typical sync durations
-	HostFileSyncDuration.Observe(0.0001)  // 0.1ms - very fast
-	HostFileSyncDuration.Observe(0.005)   // 5ms - normal
-	HostFileSyncDuration.Observe(0.050)   // 50ms - slow
+	HostFileSyncDuration.Observe(0.0001) // 0.1ms - very fast
+	HostFileSyncDuration.Observe(0.005)  // 5ms - normal
+	HostFileSyncDuration.Observe(0.050)  // 50ms - slow
 
 	// For histograms, just verify it doesn't panic
 	assert.NotNil(t, HostFileSyncDuration)

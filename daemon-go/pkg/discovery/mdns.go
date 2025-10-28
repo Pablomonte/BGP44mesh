@@ -83,13 +83,13 @@ func AdvertiseService(nodeName string, port int, keyFingerprint string) (*mdns.S
 
 	// Define service
 	service, err := mdns.NewMDNSService(
-		nodeName,           // Instance name (e.g., "node1")
-		"_bgp-node._tcp",   // Service type
-		"",                 // Domain (empty = .local)
-		"",                 // Host name (empty = use hostname)
-		port,               // Port
-		nil,                // IPs (nil = use all interfaces)
-		info,               // TXT records
+		nodeName,         // Instance name (e.g., "node1")
+		"_bgp-node._tcp", // Service type
+		"",               // Domain (empty = .local)
+		"",               // Host name (empty = use hostname)
+		port,             // Port
+		nil,              // IPs (nil = use all interfaces)
+		info,             // TXT records
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mDNS service: %w", err)

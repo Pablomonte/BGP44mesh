@@ -88,9 +88,9 @@ func TestPeersEqual(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "nil vs empty",
-			a:    nil,
-			b:    []types.Peer{},
+			name:     "nil vs empty",
+			a:        nil,
+			b:        []types.Peer{},
 			expected: true,
 		},
 	}
