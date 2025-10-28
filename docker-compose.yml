@@ -4,43 +4,41 @@ services:
   bird1:
     build: ./docker/bird
     container_name: bird1
-    hostname: bird1
-    ports:
-      - "179:179"
+    network_mode: "service:tinc1"
     volumes:
       - ./configs/bird:/etc/bird:ro
-    networks:
-      - mesh-net
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.1
     restart: unless-stopped
+    depends_on:
+      - tinc1
 
   bird2:
     build: ./docker/bird
     container_name: bird2
-    hostname: bird2
+    network_mode: "service:tinc2"
     volumes:
       - ./configs/bird:/etc/bird:ro
-    networks:
-      - mesh-net
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.2
     restart: unless-stopped
+    depends_on:
+      - tinc2
 
   bird3:
     build: ./docker/bird
     container_name: bird3
-    hostname: bird3
+    network_mode: "service:tinc3"
     volumes:
       - ./configs/bird:/etc/bird:ro
-    networks:
-      - mesh-net
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.3
     restart: unless-stopped
+    depends_on:
+      - tinc3
 
   tinc1:
     build: ./docker/tinc
@@ -52,6 +50,7 @@ services:
       - /dev/net/tun
     ports:
       - "655:655/udp"
+      - "179:179"  # BGP port (bird1 shares this network)
     volumes:
       - ./configs/tinc:/etc/tinc:ro
     depends_on:

@@ -1,4 +1,4 @@
-.PHONY: deploy-local test monitor clean validate help status
+.PHONY: deploy-local test monitor clean validate help status tinc-bootstrap
 .PHONY: test-fast test-env test-configs test-builds test-integration test-e2e test-all
 
 deploy-local: ## Deploy local environment
@@ -42,6 +42,9 @@ test-all: test-fast test-integration test-e2e ## Run all tests
 
 status: ## Show status of all containers
 	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "NAME|bird|tinc|etcd|prom"
+
+tinc-bootstrap: ## Bootstrap TINC mesh connectivity
+	./tinc_bootstrap.sh
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'

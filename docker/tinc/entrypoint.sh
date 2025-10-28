@@ -34,14 +34,17 @@ if [ ! -f "$TINC_DIR/rsa_key.priv" ]; then
 
     # Create host file with public key
     if [ -f "$TINC_DIR/rsa_key.pub" ]; then
+        # Use Docker service name for address resolution (tinc1, tinc2, tinc3)
+        CONTAINER_NAME="tinc$NODE_ID"
+
         cat > "$TINC_DIR/hosts/$TINC_NAME" << EOF
 # Host configuration for $TINC_NAME
-Address = $TINC_NAME
+Address = $CONTAINER_NAME
 Port = $TINC_PORT
 
 EOF
         cat "$TINC_DIR/rsa_key.pub" >> "$TINC_DIR/hosts/$TINC_NAME"
-        echo "✓ Host file created"
+        echo "✓ Host file created (Address = $CONTAINER_NAME)"
     fi
 else
     echo "✓ Using existing RSA keys"
@@ -63,6 +66,15 @@ with open('$TINC_DIR/tinc.conf', 'w') as f:
     f.write(output)
 EOF
     echo "✓ tinc.conf rendered"
+
+    # Add ConnectTo directives for full mesh (Sprint 1: hardcoded for 3 nodes)
+    echo "Adding ConnectTo directives for mesh..."
+    for i in 1 2 3; do
+        if [ "node$i" != "$TINC_NAME" ]; then
+            echo "ConnectTo = node$i" >> "$TINC_DIR/tinc.conf"
+        fi
+    done
+    echo "✓ ConnectTo directives added"
 fi
 
 # Render tinc-up script
