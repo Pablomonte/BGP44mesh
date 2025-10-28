@@ -2,11 +2,12 @@ FROM debian:12-slim
 
 # Install TINC 1.0 and dependencies
 RUN apt-get update && apt-get install -y \
-    tinc=1.0.* \
+    tinc \
     iproute2 \
     python3-jinja2 \
     curl \
     procps \
+    etcd-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Pin TINC 1.0 to prevent upgrades

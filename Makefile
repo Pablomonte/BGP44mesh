@@ -2,7 +2,7 @@
 .PHONY: test-fast test-env test-configs test-builds test-integration test-e2e test-all
 
 deploy-local: ## Deploy local environment
-	docker-compose up -d --build
+	docker compose up -d --build
 
 test: ## Run integration tests
 	./tests/integration/test_bgp_peering.sh
@@ -13,7 +13,7 @@ monitor: ## Open monitoring dashboard
 	@xdg-open http://localhost:3000 2>/dev/null || open http://localhost:3000 2>/dev/null || echo "Please open http://localhost:3000 manually"
 
 clean: ## Clean up
-	docker-compose down -v
+	docker compose down -v
 
 validate: ## Validate configs
 	@if [ -d ansible ]; then ansible-playbook ansible/site.yml --syntax-check; else echo "Ansible not yet implemented"; fi
