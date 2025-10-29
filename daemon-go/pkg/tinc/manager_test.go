@@ -449,9 +449,9 @@ func TestUpdateConnectTo_NonExistentFile(t *testing.T) {
 	}
 
 	// Try to update ConnectTo when tinc.conf doesn't exist
+	// Should return nil (graceful handling) instead of error during startup
 	err = manager.UpdateConnectTo([]string{"node2"})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read tinc.conf")
+	assert.NoError(t, err, "UpdateConnectTo should handle missing tinc.conf gracefully")
 }
 
 func TestUpdateConnectTo_PreservesOtherLines(t *testing.T) {
