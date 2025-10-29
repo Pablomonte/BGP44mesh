@@ -68,11 +68,27 @@ with open('$TINC_DIR/tinc.conf', 'w') as f:
 EOF
     echo "✓ tinc.conf rendered"
 
-    # Add placeholder for ConnectTo (daemon will manage them)
-    echo "# ConnectTo directives will be managed by bgp-daemon" >> "$TINC_DIR/tinc.conf"
-    echo "✓ Placeholder added (daemon will manage ConnectTo)"
+    # Add initial ConnectTo directives from etcd peers
+    echo ""
+    echo "Waiting for etcd and discovering peers..."
+    # Wait a bit for etcd to be ready and other nodes to register
+    sleep 5
+
+    # Query etcd for all peers and add ConnectTo for each (except self)
+    PEERS=$(etcdctl --endpoints=http://etcd1:2379 get /peers --prefix --keys-only 2>/dev/null | grep -v "/peers/$TINC_NAME" || true)
+
+    if [ -n "$PEERS" ]; then
+        echo "Adding ConnectTo directives for discovered peers..."
+        for peer_key in $PEERS; do
+            peer_name=$(echo "$peer_key" | sed 's#.*/##')
+            echo "ConnectTo = $peer_name" >> "$TINC_DIR/tinc.conf"
+            echo "  - $peer_name"
+        done
+    else
+        echo "No peers found yet (will connect when they appear)"
+    fi
 elif [ -f "$TINC_DIR/tinc.conf" ]; then
-    echo "✓ Using existing tinc.conf (managed by daemon)"
+    echo "✓ Using existing tinc.conf"
 fi
 
 # Render tinc-up script
