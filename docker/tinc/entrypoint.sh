@@ -68,44 +68,24 @@ with open('$TINC_DIR/tinc.conf', 'w') as f:
 EOF
     echo "✓ tinc.conf rendered"
 
-    # Add initial ConnectTo directives from etcd peers
+    # Add bootstrap ConnectTo directives
+    # Strategy: All nodes connect to node1 for initial star topology
+    # Once daemon syncs host files, TINC will discover full mesh
     echo ""
-    echo "Waiting for etcd and discovering peers..."
+    echo "Adding bootstrap ConnectTo directives..."
 
-    # Retry loop: wait until we have at least 2 other peers or timeout
-    MAX_RETRIES=12  # 12 retries * 5s = 60s total wait
-    RETRY=0
-    PEER_COUNT=0
-
-    while [ $RETRY -lt $MAX_RETRIES ]; do
-        # Query etcd for all peers (except self)
-        PEERS=$(etcdctl --endpoints=http://etcd1:2379 get /peers --prefix --keys-only 2>/dev/null | grep -v "/peers/$TINC_NAME" || true)
-
-        # Count peers - use wc -l on filtered list
-        if [ -z "$PEERS" ]; then
-            PEER_COUNT=0
-        else
-            PEER_COUNT=$(echo "$PEERS" | wc -l | tr -d '[:space:]')
-        fi
-
-        if [ "$PEER_COUNT" -ge 2 ]; then
-            echo "Found $PEER_COUNT peers, adding ConnectTo directives..."
-            for peer_key in $PEERS; do
-                peer_name=$(echo "$peer_key" | sed 's#.*/##')
-                echo "ConnectTo = $peer_name" >> "$TINC_DIR/tinc.conf"
-                echo "  - $peer_name"
-            done
-            break
-        else
-            RETRY=$((RETRY + 1))
-            echo "Waiting for peers... ($PEER_COUNT found, attempt $RETRY/$MAX_RETRIES)"
-            sleep 5
-        fi
-    done
-
-    if [ "$PEER_COUNT" -lt 2 ]; then
-        echo "⚠ Warning: Only $PEER_COUNT peers found after 60s. Starting anyway..."
+    if [ "$TINC_NAME" != "node1" ]; then
+        # All nodes except node1 connect to node1
+        echo "ConnectTo = node1" >> "$TINC_DIR/tinc.conf"
+        echo "  - node1 (bootstrap hub)"
+    else
+        # node1 also connects to others for redundancy
+        echo "ConnectTo = node2" >> "$TINC_DIR/tinc.conf"
+        echo "ConnectTo = node3" >> "$TINC_DIR/tinc.conf"
+        echo "  - node2, node3 (bootstrap redundancy)"
     fi
+
+    echo "✓ Bootstrap topology configured"
 elif [ -f "$TINC_DIR/tinc.conf" ]; then
     echo "✓ Using existing tinc.conf"
 fi
