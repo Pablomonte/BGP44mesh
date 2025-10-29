@@ -80,7 +80,13 @@ EOF
     while [ $RETRY -lt $MAX_RETRIES ]; do
         # Query etcd for all peers (except self)
         PEERS=$(etcdctl --endpoints=http://etcd1:2379 get /peers --prefix --keys-only 2>/dev/null | grep -v "/peers/$TINC_NAME" || true)
-        PEER_COUNT=$(echo "$PEERS" | grep -c "/peers/" || echo "0")
+
+        # Count peers - use wc -l on filtered list
+        if [ -z "$PEERS" ]; then
+            PEER_COUNT=0
+        else
+            PEER_COUNT=$(echo "$PEERS" | wc -l | tr -d '[:space:]')
+        fi
 
         if [ "$PEER_COUNT" -ge 2 ]; then
             echo "Found $PEER_COUNT peers, adding ConnectTo directives..."
