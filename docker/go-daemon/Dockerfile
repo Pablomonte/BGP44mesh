@@ -21,6 +21,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o 
 FROM alpine:latest
 
 # Install runtime dependencies
+# tinc package provides tincd binary needed for reload via pidfile
 RUN apk add --no-cache \
     tinc \
     ca-certificates \

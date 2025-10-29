@@ -124,8 +124,12 @@ echo ""
 echo "Starting TINC daemon..."
 echo "============================================"
 
-# Use exec to replace shell with tincd process (PID 1)
-# -D = no daemon, stay in foreground
+# Start tincd in daemon mode (creates pidfile for reload support)
 # -d3 = debug level 3
 # Using full config path
-exec tincd -c /var/run/tinc/"$TINC_NETNAME" -D -d3
+# Note: Don't use -D (foreground) so pidfile is created for cross-container reload
+tincd -c /var/run/tinc/"$TINC_NETNAME" -d3
+
+# Keep container running and tail logs
+echo "TINC daemon started, monitoring logs..."
+tail -f /var/run/tinc/"$TINC_NETNAME"/tinc.log 2>/dev/null || sleep infinity

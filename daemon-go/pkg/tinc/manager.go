@@ -86,12 +86,14 @@ func (m *Manager) RemoveHostFile(nodeName string) error {
 }
 
 // Reload triggers TINC daemon to reload configuration
-// Uses tinc client to connect to tincd control socket
-// This works across separate containers sharing volumes
+// Uses TINC 1.0's signal mechanism via pidfile
+// This works across separate containers sharing /var/run/tinc volume
 func (m *Manager) Reload() error {
-	// Use tinc client which connects via control socket (/var/run/tinc/<netname>/tinc.socket)
-	// This works when daemon and tincd are in separate PID namespaces (different containers)
-	cmd := exec.Command("tinc", "-n", m.netName, "reload")
+	// TINC 1.0 uses tincd -k to send signals via pidfile
+	// -k = --kill signal (HUP = reload configuration)
+	// -n = network name
+	// -c = config directory
+	cmd := exec.Command("tincd", "-n", m.netName, "-c", m.baseDir, "-kHUP")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
