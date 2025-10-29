@@ -86,6 +86,28 @@ EOF
     fi
 
     echo "✓ Bootstrap topology configured"
+
+    # Wait for daemons to sync host files from etcd
+    # Give other nodes time to register and daemons time to propagate
+    echo ""
+    echo "Waiting for host file propagation (10s)..."
+    sleep 10
+
+    # Check if we have host files for peers we're trying to connect to
+    MISSING_HOSTS=""
+    if [ "$TINC_NAME" != "node1" ]; then
+        [ ! -f "$TINC_DIR/hosts/node1" ] && MISSING_HOSTS="node1 $MISSING_HOSTS"
+    else
+        [ ! -f "$TINC_DIR/hosts/node2" ] && MISSING_HOSTS="node2 $MISSING_HOSTS"
+        [ ! -f "$TINC_DIR/hosts/node3" ] && MISSING_HOSTS="node3 $MISSING_HOSTS"
+    fi
+
+    if [ -n "$MISSING_HOSTS" ]; then
+        echo "⚠ Warning: Missing host files for: $MISSING_HOSTS"
+        echo "   TINC may not connect until daemon syncs these files"
+    else
+        echo "✓ All required host files present"
+    fi
 elif [ -f "$TINC_DIR/tinc.conf" ]; then
     echo "✓ Using existing tinc.conf"
 fi
