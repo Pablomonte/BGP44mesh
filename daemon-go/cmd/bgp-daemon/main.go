@@ -237,30 +237,10 @@ func main() {
 			}
 		}
 
-		// Reload TINC daemon
-		reloadFailed := false
+		// Note: No reload needed - TINC automatically discovers peers
+		// from hosts/ directory when it starts and periodically rescans
 		if syncedCount > 0 {
-			log.Println("Reloading TINC daemon...")
-			if err := tincManager.Reload(); err != nil {
-				log.Printf("⚠ Failed initial TINC reload: %v", err)
-				log.Println("  (Will retry after TINC startup)")
-				reloadFailed = true
-			} else {
-				log.Println("✓ TINC daemon reloaded with peers")
-			}
-		}
-
-		// If initial reload failed, retry after TINC has had time to start
-		if reloadFailed {
-			go func() {
-				time.Sleep(10 * time.Second)
-				log.Println("Retrying TINC reload...")
-				if err := tincManager.Reload(); err != nil {
-					log.Printf("⚠ Retry reload failed: %v", err)
-				} else {
-					log.Println("✓ TINC daemon reloaded successfully on retry")
-				}
-			}()
+			log.Println("✓ Peers synced (TINC will auto-discover)")
 		}
 	}
 
@@ -338,16 +318,10 @@ func main() {
 						}
 					}
 
-					// Reload TINC daemon with duration measurement
-					reloadStart := time.Now()
-					if err := tincManager.Reload(); err != nil {
-						log.Printf("⚠ Failed to reload tincd: %v", err)
-						metrics.PeerSyncTotal.WithLabelValues("error", "PUT").Inc()
-					} else {
-						metrics.TincReloadDuration.Observe(time.Since(reloadStart).Seconds())
-						metrics.PeerSyncTotal.WithLabelValues("success", "PUT").Inc()
-						log.Printf("✓ Reloaded TINC daemon")
-					}
+					// Note: TINC automatically discovers peers from hosts/ directory
+					// No reload needed - tincd rescans host files periodically
+					metrics.PeerSyncTotal.WithLabelValues("success", "PUT").Inc()
+					log.Printf("✓ Peer synced (TINC will auto-discover)")
 
 				case clientv3.EventTypeDelete:
 					log.Printf("🗑️  etcd DELETE: %s", key)

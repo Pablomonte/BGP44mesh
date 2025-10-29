@@ -124,12 +124,9 @@ echo ""
 echo "Starting TINC daemon..."
 echo "============================================"
 
-# Start tincd in daemon mode (creates pidfile for reload support)
+# Start tincd in foreground mode
+# -D = no daemon, stay in foreground (required for Docker)
 # -d3 = debug level 3
+# --logfile = write logs to file for debugging
 # Using full config path
-# Note: Don't use -D (foreground) so pidfile is created for cross-container reload
-tincd -c /var/run/tinc/"$TINC_NETNAME" -d3
-
-# Keep container running and tail logs
-echo "TINC daemon started, monitoring logs..."
-tail -f /var/run/tinc/"$TINC_NETNAME"/tinc.log 2>/dev/null || sleep infinity
+exec tincd -c /var/run/tinc/"$TINC_NETNAME" -D -d3 --logfile="/var/run/tinc/$TINC_NETNAME/tinc.log"
