@@ -71,21 +71,34 @@ EOF
     # Add initial ConnectTo directives from etcd peers
     echo ""
     echo "Waiting for etcd and discovering peers..."
-    # Wait a bit for etcd to be ready and other nodes to register
-    sleep 5
 
-    # Query etcd for all peers and add ConnectTo for each (except self)
-    PEERS=$(etcdctl --endpoints=http://etcd1:2379 get /peers --prefix --keys-only 2>/dev/null | grep -v "/peers/$TINC_NAME" || true)
+    # Retry loop: wait until we have at least 2 other peers or timeout
+    MAX_RETRIES=12  # 12 retries * 5s = 60s total wait
+    RETRY=0
+    PEER_COUNT=0
 
-    if [ -n "$PEERS" ]; then
-        echo "Adding ConnectTo directives for discovered peers..."
-        for peer_key in $PEERS; do
-            peer_name=$(echo "$peer_key" | sed 's#.*/##')
-            echo "ConnectTo = $peer_name" >> "$TINC_DIR/tinc.conf"
-            echo "  - $peer_name"
-        done
-    else
-        echo "No peers found yet (will connect when they appear)"
+    while [ $RETRY -lt $MAX_RETRIES ]; do
+        # Query etcd for all peers (except self)
+        PEERS=$(etcdctl --endpoints=http://etcd1:2379 get /peers --prefix --keys-only 2>/dev/null | grep -v "/peers/$TINC_NAME" || true)
+        PEER_COUNT=$(echo "$PEERS" | grep -c "/peers/" || echo "0")
+
+        if [ "$PEER_COUNT" -ge 2 ]; then
+            echo "Found $PEER_COUNT peers, adding ConnectTo directives..."
+            for peer_key in $PEERS; do
+                peer_name=$(echo "$peer_key" | sed 's#.*/##')
+                echo "ConnectTo = $peer_name" >> "$TINC_DIR/tinc.conf"
+                echo "  - $peer_name"
+            done
+            break
+        else
+            RETRY=$((RETRY + 1))
+            echo "Waiting for peers... ($PEER_COUNT found, attempt $RETRY/$MAX_RETRIES)"
+            sleep 5
+        fi
+    done
+
+    if [ "$PEER_COUNT" -lt 2 ]; then
+        echo "⚠ Warning: Only $PEER_COUNT peers found after 60s. Starting anyway..."
     fi
 elif [ -f "$TINC_DIR/tinc.conf" ]; then
     echo "✓ Using existing tinc.conf"
