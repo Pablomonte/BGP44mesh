@@ -191,7 +191,7 @@ func main() {
 	// Heurística de "ventana de calma" para peer discovery
 	// Espera hasta que no haya nuevos peers registrándose (convergencia natural)
 	// con timeout de seguridad para no esperar indefinidamente
-	calmWindow := 2 * time.Second        // Tiempo sin cambios = todos registrados
+	calmWindow := 2 * time.Second // Tiempo sin cambios = todos registrados
 	checkInterval := 500 * time.Millisecond
 	maxWaitTime := 10 * time.Second
 
