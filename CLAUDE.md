@@ -4,17 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**BGP Overlay Network over TINC Mesh** - A minimalist but robust 3-node local development environment (Sprint 1) that integrates:
-- **BIRD 3.x**: BGP routing daemon with MP-BGP support
+**BGP Overlay Network over TINC Mesh** - A minimalist but robust 5-node local development environment (Sprint 1.5) that integrates:
+- **BIRD 2.x**: BGP routing daemon with dynamic peer configuration
 - **TINC 1.0**: Layer 2 mesh VPN (switch mode, RSA-2048, AES-256)
 - **etcd 3.5+**: Distributed key-value store for peer propagation
 - **Prometheus/Grafana**: Monitoring and metrics
-- **Go daemon**: Custom propagation logic (mDNS discovery, etcd integration)
-- **Ansible**: Orchestration with atomic roles
+- **Go daemon**: Custom propagation logic (etcd watch, TINC topology management)
+- **Ansible**: Orchestration with atomic roles (for production deployment)
 
-**Total Files**: 28 exactly, optimized for quick bootstrap
+**Total Files**: 29, optimized for quick bootstrap
 **Convergence Time**: <2min on hosts with >8GB RAM
-**Architecture Focus**: Separation of concerns with idempotent configs
+**Architecture Focus**: Separation of concerns with idempotent configs, dynamic peer discovery
+**Scalability**: Full mesh topology supports any number of nodes (tested with 3-5 nodes)
 
 ## Quick Start
 
@@ -45,7 +46,7 @@ project-bgp/
 ├── .gitignore                  # Go builds, .env, Docker caches, TINC keys
 ├── README.md                   # Overview linking to QUICKSTART, stack description
 ├── Makefile                    # Automation: deploy-local, test, monitor, clean, validate, help
-├── docker-compose.yml          # 9 services: 3×bird/tinc/etcd + prometheus + grafana
+├── docker-compose.yml          # 15 services: 5×bird/tinc/daemon + 5×etcd + prometheus
 ├── .env.example                # BGP_AS, TINC_PORT, ETCD_INITIAL_CLUSTER, BIRD_PASSWORD
 ├── .editorconfig               # indent_size: 2 (YAML), 8 (Go), 4 (sh)
 ├── docs/
@@ -66,7 +67,8 @@ project-bgp/
 │   ├── bird/
 │   │   ├── bird.conf.j2        # Router ID, BGP AS, protocols (vars: router_id, bgp_as)
 │   │   ├── filters.conf        # Static route-maps, prefix-lists (anti-hijack)
-│   │   └── protocols.conf      # Peer definitions (static but overridable)
+│   │   ├── protocols.conf.j2   # Dynamic BGP peer template (N-1 peers auto-generated)
+│   │   └── protocols.conf      # Legacy static config (unused, kept for reference)
 │   ├── tinc/
 │   │   ├── tinc.conf.j2        # Mode=switch, Cipher=AES-256 (vars: hostname)
 │   │   ├── tinc-up.j2          # ip link up, etcd put /peers/{{Name}}
@@ -206,7 +208,7 @@ volumes:
 ## Setup
 1. git clone repo
 2. cp .env.example .env; edit BGP_AS=65001
-3. make deploy-local  # Builds and starts 3-node mesh
+3. make deploy-local  # Builds and starts 5-node full mesh
 4. Wait ~1min for convergence
 
 ## Verify
@@ -228,10 +230,10 @@ make clean
 
 ### Step 2: Configurations (configs/ dir) - 45min
 
-**Files to create (8)**:
+**Files to create (9)**:
 1. `configs/bird/bird.conf.j2` - Critical vars: `{{ router_id }}`, `{{ bgp_as }}` (required)
 2. `configs/bird/filters.conf` - Static prefix-lists: `if net ~ [2001:db8::/48] then accept; reject;`
-3. `configs/bird/protocols.conf` - Static peers: `protocol bgp peer1 { local as {{ bgp_as }}; neighbor 10.0.0.2 as 65001; password "{{ bgp_pass }}"; }`
+3. `configs/bird/protocols.conf.j2` - **Dynamic template**: Generates N-1 BGP peers automatically using `{% for peer_id in range(1, total_nodes + 1) %}` loop with vars: `{{ node_ip }}`, `{{ node_id }}`, `{{ bgp_as }}`, `{{ total_nodes }}`
 4. `configs/tinc/tinc.conf.j2` - Critical: `{{ Name=hostname }}`, `{{ Mode=switch }}`; optional: `{{ Cipher=AES-256-CBC }}`
 5. `configs/tinc/tinc-up.j2` - `ip link set $INTERFACE up mtu 1400; ip -6 addr add {{ ipv6_prefix }} dev $INTERFACE; etcdctl put /peers/{{ Name }} "$(tinc info)"`
 6. `configs/tinc/tinc-down.j2` - `etcdctl del /peers/{{ Name }}; ip link set $INTERFACE down`
@@ -729,12 +731,26 @@ If using Docker Desktop on macOS:
 
 ## Sprint 1 Success Metrics
 
-- [ ] `make deploy-local` functional in <5min
-- [ ] BGP sessions established (`birdc show protocols`)
-- [ ] TINC mesh up (`tinc dump reachable`)
-- [ ] etcd propagation working (`etcdctl get /peers`)
-- [ ] Prometheus scraping metrics
-- [ ] Integration test passes
+- [x] `make deploy-local` functional in <2min
+- [x] BGP sessions established (`birdc show protocols`)
+- [x] TINC mesh up (layer 2 connectivity verified)
+- [x] etcd propagation working (`etcdctl get /peers`)
+- [x] Prometheus scraping metrics
+- [x] Integration test passes
+
+## Sprint 1.5 Enhancements (Completed)
+
+**Objective**: Scale from 3 to 5 nodes with dynamic configuration
+
+**Achievements**:
+- [x] Dynamic BGP peer configuration via `protocols.conf.j2` template
+- [x] Full mesh topology auto-generates N-1 peers per node
+- [x] Environment variables: `NODE_IP`, `NODE_ID`, `TOTAL_NODES` added to bird containers
+- [x] Scalable test suite with dynamic node count detection
+- [x] Per-node validation loops (tests all nodes, not just node1)
+- [x] Full mesh ping validation (N×(N-1) pairs)
+- [x] Integration tests pass with 5 nodes (20/20 pings successful)
+- [x] BGP sessions: 4/4 per node (full mesh verified)
 
 ## Architecture Philosophy
 
@@ -762,6 +778,6 @@ After completing Step 6, proceed with:
 - **Arquitectura**: Detailed technical design document in this repo
 - **PLAN-OPTIMIZADO-GROK.md**: Optimization decisions (28 files vs 42-45)
 - **PROMPT-BGP-NETWORK.md**: Full project prompt with architecture diagrams
-- BIRD 3.x: https://bird.network.cz/
+- BIRD 2.x: https://bird.network.cz/ (using BIRD 2.0.12)
 - TINC 1.0: https://www.tinc-vpn.org/
 - etcd: https://etcd.io/

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pablomonte/bgp-daemon/pkg/types"
 )
@@ -37,9 +38,9 @@ func NewManager(netName string) *Manager {
 }
 
 // SyncHostFile creates or updates a host file for a peer
-func (m *Manager) SyncHostFile(peer types.Peer) error {
-	// Extract node name from peer endpoint or key
-	nodeName := extractNodeName(peer)
+// nodeName is the TINC node name (e.g., "node2") used for the filename
+// peer.Endpoint contains the DNS-resolvable hostname (e.g., "tinc2:655") for the Address field
+func (m *Manager) SyncHostFile(nodeName string, peer types.Peer) error {
 	if nodeName == "" {
 		return fmt.Errorf("invalid peer: missing node name")
 	}
@@ -53,18 +54,22 @@ func (m *Manager) SyncHostFile(peer types.Peer) error {
 	}
 
 	// Extract address from endpoint (remove port if present)
+	// This is the DNS-resolvable hostname (e.g., "tinc2")
 	address := peer.Endpoint
 	if idx := strings.Index(peer.Endpoint, ":"); idx != -1 {
 		address = peer.Endpoint[:idx]
 	}
 
 	// Create host file content
+	// File is named with TINC node name (node2), but Address uses Docker hostname (tinc2)
+	// Subnet declaration is required for TINC switch mode to map IPs to nodes
 	content := fmt.Sprintf(`# Host configuration for %s
 Address = %s
 Port = 655
+Subnet = %s/32
 
 %s
-`, nodeName, address, keyData)
+`, nodeName, address, peer.IP.String(), keyData)
 
 	// Write host file
 	if err := os.WriteFile(hostFilePath, []byte(content), 0644); err != nil {
@@ -86,21 +91,55 @@ func (m *Manager) RemoveHostFile(nodeName string) error {
 }
 
 // Reload triggers TINC daemon to reload configuration
-// Uses TINC 1.0's signal mechanism via pidfile
-// This works across separate containers sharing /var/run/tinc volume
+// Uses SIGHUP signal (TINC 1.0 mechanism) with shared PID namespace
+// Includes retry logic with exponential backoff for robustness
 func (m *Manager) Reload() error {
-	// TINC 1.0 uses tincd -k to send signals via pidfile
-	// -k = --kill signal (HUP = reload configuration)
-	// -n = network name
-	// -c = config directory
-	cmd := exec.Command("tincd", "-n", m.netName, "-c", m.baseDir, "-kHUP")
+	// Retry with exponential backoff for transient errors
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		// Find tincd process PID (visible due to shared PID namespace)
+		pidCmd := exec.Command("pidof", "tincd")
+		output, err := pidCmd.Output()
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to reload tincd: %w (output: %s)", err, string(output))
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d: tincd process not found: %w", attempt, err)
+			if attempt < 3 {
+				// Wait before retry - tincd might be starting
+				backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("tincd process not found after %d attempts: %w", attempt, lastErr)
+		}
+
+		pidStr := strings.TrimSpace(string(output))
+		if pidStr == "" {
+			lastErr = fmt.Errorf("attempt %d: no tincd PID found", attempt)
+			if attempt < 3 {
+				backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("no tincd PID found after %d attempts", attempt)
+		}
+
+		// Send SIGHUP signal to reload configuration
+		killCmd := exec.Command("kill", "-HUP", pidStr)
+		if err := killCmd.Run(); err != nil {
+			lastErr = fmt.Errorf("attempt %d: failed to send SIGHUP to tincd (PID %s): %w", attempt, pidStr, err)
+			if attempt < 3 {
+				backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+				time.Sleep(backoff)
+				continue
+			}
+			return fmt.Errorf("failed to reload tincd after %d attempts: %w", attempt, lastErr)
+		}
+
+		// Success
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("reload failed after 3 attempts: %w", lastErr)
 }
 
 // GetPublicKey reads the public key from the local host file
@@ -163,6 +202,116 @@ func (m *Manager) UpdateConnectTo(peerNames []string) error {
 	}
 
 	return nil
+}
+
+// AddConnection is a no-op for TINC 1.0 (file-based configuration)
+// TINC 1.0 doesn't have CLI commands like 'tinc add ConnectTo'
+// Connections are managed via UpdateConnectTo() + Reload() instead
+func (m *Manager) AddConnection(peerName string) error {
+	// No-op: TINC 1.0 uses file-based config only
+	// Use UpdateConnectTo() + Reload() for connection management
+	return nil
+}
+
+// RemoveConnection is a no-op for TINC 1.0 (file-based configuration)
+// TINC 1.0 doesn't have CLI commands like 'tinc del ConnectTo'
+// Connections are managed via UpdateConnectTo() + Reload() instead
+func (m *Manager) RemoveConnection(peerName string) error {
+	// No-op: TINC 1.0 uses file-based config only
+	// Use UpdateConnectTo() + Reload() for connection management
+	return nil
+}
+
+// GetCurrentConnections returns list of ConnectTo peers from tinc.conf
+// For TINC 1.0, we read the config file since CLI commands don't exist
+func (m *Manager) GetCurrentConnections() ([]string, error) {
+	confPath := filepath.Join(m.baseDir, "tinc.conf")
+
+	data, err := os.ReadFile(confPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tinc.conf: %w", err)
+	}
+
+	peers := make([]string, 0)
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Look for "ConnectTo = <peer>" lines
+		if strings.HasPrefix(trimmed, "ConnectTo") {
+			// Parse: "ConnectTo = node2" or "ConnectTo=node2"
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 {
+				peerName := strings.TrimSpace(parts[1])
+				if peerName != "" {
+					peers = append(peers, peerName)
+				}
+			}
+		}
+	}
+
+	return peers, nil
+}
+
+// GetDesiredConnections returns list of peers that SHOULD be connected (full mesh logic)
+// Excludes own node name
+func (m *Manager) GetDesiredConnections(allPeers []string, ownNodeName string) []string {
+	desired := make([]string, 0)
+	for _, peer := range allPeers {
+		if peer != ownNodeName && peer != "" {
+			desired = append(desired, peer)
+		}
+	}
+	return desired
+}
+
+// ReconcileConnections implements full mesh for TINC 1.0 (file-based)
+// Updates tinc.conf with desired peers and reloads daemon
+// Returns (added, removed, error)
+func (m *Manager) ReconcileConnections(desiredPeers []string) (int, int, error) {
+	// Get current connections from tinc.conf
+	current, err := m.GetCurrentConnections()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get current connections: %w", err)
+	}
+
+	// Calculate diffs for metrics
+	currentSet := make(map[string]bool)
+	for _, peer := range current {
+		currentSet[peer] = true
+	}
+
+	desiredSet := make(map[string]bool)
+	for _, peer := range desiredPeers {
+		desiredSet[peer] = true
+	}
+
+	added := 0
+	removed := 0
+
+	for _, peer := range desiredPeers {
+		if !currentSet[peer] {
+			added++
+		}
+	}
+
+	for _, peer := range current {
+		if !desiredSet[peer] {
+			removed++
+		}
+	}
+
+	// Update tinc.conf with full peer list
+	if err := m.UpdateConnectTo(desiredPeers); err != nil {
+		return 0, 0, fmt.Errorf("failed to update tinc.conf: %w", err)
+	}
+
+	// Reload TINC daemon to apply changes (SIGHUP)
+	if err := m.Reload(); err != nil {
+		return added, removed, fmt.Errorf("failed to reload tincd: %w", err)
+	}
+
+	return added, removed, nil
 }
 
 // extractNodeName extracts the node name from a peer

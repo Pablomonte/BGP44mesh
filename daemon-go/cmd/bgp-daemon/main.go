@@ -124,7 +124,10 @@ func main() {
 			peerJSON, err := json.Marshal(peerData)
 			if err == nil {
 				peerKey := "/peers/" + *nodeName
-				if _, err := cli.Put(ctx, peerKey, string(peerJSON)); err != nil {
+				// Add 5-second timeout for Put operation
+				putCtx, putCancel := context.WithTimeout(ctx, 5*time.Second)
+				defer putCancel()
+				if _, err := cli.Put(putCtx, peerKey, string(peerJSON)); err != nil {
 					log.Printf("⚠ Failed to store own key in etcd: %v", err)
 				} else {
 					log.Printf("✓ Stored own key in etcd at %s", peerKey)
@@ -184,10 +187,67 @@ func main() {
 	// Perform initial peer sync from etcd
 	log.Println()
 	log.Println("Syncing TINC keys from etcd...")
-	resp, err := cli.Get(ctx, "/peers/", clientv3.WithPrefix())
-	if err != nil {
-		log.Printf("⚠ Failed to fetch peers from etcd: %v", err)
-	} else {
+
+	// Heurística de "ventana de calma" para peer discovery
+	// Espera hasta que no haya nuevos peers registrándose (convergencia natural)
+	// con timeout de seguridad para no esperar indefinidamente
+	calmWindow := 2 * time.Second        // Tiempo sin cambios = todos registrados
+	checkInterval := 500 * time.Millisecond
+	maxWaitTime := 10 * time.Second
+
+	startTime := time.Now()
+	lastPeerCount := 0
+	calmDuration := time.Duration(0)
+
+	var resp *clientv3.GetResponse
+
+	// Loop de discovery con heurística adaptativa
+	for {
+		// Add 3-second timeout for each Get attempt
+		getCtx, getCancel := context.WithTimeout(ctx, 3*time.Second)
+		resp, err = cli.Get(getCtx, "/peers/", clientv3.WithPrefix())
+		getCancel()
+		if err != nil {
+			log.Printf("⚠ Failed to fetch peers: %v", err)
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		currentPeerCount := len(resp.Kvs)
+
+		// Nuevos peers detectados - resetear ventana de calma
+		if currentPeerCount > lastPeerCount {
+			if lastPeerCount == 0 {
+				log.Printf("⏳ Discovered %d peers, waiting for cluster to stabilize...", currentPeerCount)
+			} else {
+				log.Printf("⏳ Discovered %d peers (was %d), waiting for more...", currentPeerCount, lastPeerCount)
+			}
+			lastPeerCount = currentPeerCount
+			calmDuration = 0
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		// No hay cambios - incrementar tiempo de calma
+		calmDuration += checkInterval
+
+		// Condición 1: Ventana de calma alcanzada (estable)
+		if calmDuration >= calmWindow {
+			log.Printf("✓ Peer discovery stable (%d peers found)", currentPeerCount)
+			break
+		}
+
+		// Condición 2: Timeout máximo de seguridad
+		if time.Since(startTime) >= maxWaitTime {
+			log.Printf("⚠ Discovery timeout reached, proceeding with %d peers", currentPeerCount)
+			break
+		}
+
+		time.Sleep(checkInterval)
+	}
+
+	// Procesar todos los peers descubiertos
+	if err == nil {
 		peerNames := make([]string, 0)
 		syncedCount := 0
 
@@ -214,7 +274,7 @@ func main() {
 			}
 
 			// Sync host file
-			if err := tincManager.SyncHostFile(peer); err != nil {
+			if err := tincManager.SyncHostFile(peerNodeName, peer); err != nil {
 				log.Printf("⚠ Failed to sync %s: %v", peerNodeName, err)
 			} else {
 				peerNames = append(peerNames, peerNodeName)
@@ -227,20 +287,32 @@ func main() {
 
 		log.Printf("✓ Synced %d peer host files", syncedCount)
 
-		// Update ConnectTo directives
+		// Reconcile TINC connections (file-based for TINC 1.0)
+		// Updates tinc.conf and reloads daemon
 		if len(peerNames) > 0 {
-			log.Println("Updating ConnectTo directives...")
-			if err := tincManager.UpdateConnectTo(peerNames); err != nil {
-				log.Printf("⚠ Failed to update ConnectTo: %v", err)
+			log.Println()
+			log.Println("Reconciling TINC connections...")
+			added, removed, err := tincManager.ReconcileConnections(peerNames)
+			if err != nil {
+				log.Printf("⚠ Reconciliation failed: %v", err)
 			} else {
-				log.Printf("✓ Updated ConnectTo with %d peers", len(peerNames))
-			}
-		}
+				log.Printf("✓ Connections reconciled (added: %d, removed: %d)", added, removed)
 
-		// Note: No reload needed - TINC automatically discovers peers
-		// from hosts/ directory when it starts and periodically rescans
-		if syncedCount > 0 {
-			log.Println("✓ Peers synced (TINC will auto-discover)")
+				// Update metrics
+				if added > 0 {
+					metrics.TincConnectionOperations.WithLabelValues("add", "success").Add(float64(added))
+				}
+				if removed > 0 {
+					metrics.TincConnectionOperations.WithLabelValues("remove", "success").Add(float64(removed))
+				}
+
+				// Display current topology
+				if *verbose {
+					currentConns, _ := tincManager.GetCurrentConnections()
+					log.Printf("📊 Current connections: %v", currentConns)
+					metrics.TincConnectionsActive.Set(float64(len(currentConns)))
+				}
+			}
 		}
 	}
 
@@ -288,40 +360,72 @@ func main() {
 						continue
 					}
 
+					peerNodeName := extractNodeNameFromKey(key)
+
+					// Skip own node
+					if peerNodeName == *nodeName {
+						if *verbose {
+							log.Printf("  Skipping own node update")
+						}
+						continue
+					}
+
 					if *verbose {
 						log.Printf("   Peer: %v", peer)
 					}
 
-					// Sync host file to TINC with duration measurement
+					// Step 1: Sync host file (persistent)
 					syncStart := time.Now()
-					if err := tincManager.SyncHostFile(peer); err != nil {
+					if err := tincManager.SyncHostFile(peerNodeName, peer); err != nil {
 						log.Printf("❌ Failed to sync host file: %v", err)
 						metrics.PeerSyncTotal.WithLabelValues("error", "PUT").Inc()
 						continue
 					}
 					metrics.HostFileSyncDuration.Observe(time.Since(syncStart).Seconds())
-					log.Printf("✓ Synced host file for peer")
+					log.Printf("✓ Synced host file for %s", peerNodeName)
 
-					// Update ConnectTo directives with current peers
-					resp, err := cli.Get(ctx, "/peers/", clientv3.WithPrefix())
-					if err == nil {
-						peerNames := make([]string, 0)
-						for _, kv := range resp.Kvs {
-							peerNodeName := extractNodeNameFromKey(string(kv.Key))
-							// Skip own node
-							if peerNodeName != *nodeName && peerNodeName != "" {
-								peerNames = append(peerNames, peerNodeName)
-							}
-						}
-						if err := tincManager.UpdateConnectTo(peerNames); err != nil {
-							log.Printf("⚠ Failed to update ConnectTo: %v", err)
+					// Step 2: Get all current peers from etcd
+					getCtx, getCancel := context.WithTimeout(ctx, 3*time.Second)
+					resp, err := cli.Get(getCtx, "/peers/", clientv3.WithPrefix())
+					getCancel()
+					if err != nil {
+						log.Printf("⚠ Failed to fetch all peers: %v", err)
+						metrics.PeerSyncTotal.WithLabelValues("error", "PUT").Inc()
+						continue
+					}
+
+					allPeerNames := make([]string, 0)
+					for _, kv := range resp.Kvs {
+						pn := extractNodeNameFromKey(string(kv.Key))
+						if pn != *nodeName && pn != "" {
+							allPeerNames = append(allPeerNames, pn)
 						}
 					}
 
-					// Note: TINC automatically discovers peers from hosts/ directory
-					// No reload needed - tincd rescans host files periodically
-					metrics.PeerSyncTotal.WithLabelValues("success", "PUT").Inc()
-					log.Printf("✓ Peer synced (TINC will auto-discover)")
+					// Step 3: Reconcile connections (TINC 1.0 file-based)
+					// Updates tinc.conf and reloads daemon
+					added, removed, err := tincManager.ReconcileConnections(allPeerNames)
+					if err != nil {
+						log.Printf("❌ Failed to reconcile connections: %v", err)
+						metrics.PeerSyncTotal.WithLabelValues("error", "PUT").Inc()
+					} else {
+						log.Printf("✓ Connections reconciled for %s (added: %d, removed: %d)", peerNodeName, added, removed)
+						metrics.PeerSyncTotal.WithLabelValues("success", "PUT").Inc()
+
+						if added > 0 {
+							metrics.TincConnectionOperations.WithLabelValues("add", "success").Add(float64(added))
+						}
+						if removed > 0 {
+							metrics.TincConnectionOperations.WithLabelValues("remove", "success").Add(float64(removed))
+						}
+
+						// Display current topology
+						if *verbose {
+							currentConns, _ := tincManager.GetCurrentConnections()
+							log.Printf("📊 Current connections: %v", currentConns)
+							metrics.TincConnectionsActive.Set(float64(len(currentConns)))
+						}
+					}
 
 				case clientv3.EventTypeDelete:
 					log.Printf("🗑️  etcd DELETE: %s", key)
@@ -334,41 +438,53 @@ func main() {
 						continue
 					}
 
-					log.Printf("   Removing host file for: %s", deletedNodeName)
+					log.Printf("   Removing peer: %s", deletedNodeName)
 
-					// Remove host file
+					// Step 1: Remove host file (persistent)
 					if err := tincManager.RemoveHostFile(deletedNodeName); err != nil {
 						log.Printf("⚠ Failed to remove host file: %v", err)
+					} else {
+						log.Printf("✓ Removed host file for %s", deletedNodeName)
+					}
+
+					// Step 2: Get remaining peers from etcd
+					getCtx, getCancel := context.WithTimeout(ctx, 3*time.Second)
+					resp, err := cli.Get(getCtx, "/peers/", clientv3.WithPrefix())
+					getCancel()
+					if err != nil {
+						log.Printf("⚠ Failed to fetch remaining peers: %v", err)
 						metrics.PeerSyncTotal.WithLabelValues("error", "DELETE").Inc()
 						continue
 					}
-					log.Printf("✓ Removed host file")
 
-					// Update ConnectTo directives with current peers
-					resp, err := cli.Get(ctx, "/peers/", clientv3.WithPrefix())
-					if err == nil {
-						peerNames := make([]string, 0)
-						for _, kv := range resp.Kvs {
-							peerNodeName := extractNodeNameFromKey(string(kv.Key))
-							// Skip own node
-							if peerNodeName != *nodeName && peerNodeName != "" {
-								peerNames = append(peerNames, peerNodeName)
-							}
-						}
-						if err := tincManager.UpdateConnectTo(peerNames); err != nil {
-							log.Printf("⚠ Failed to update ConnectTo: %v", err)
+					remainingPeerNames := make([]string, 0)
+					for _, kv := range resp.Kvs {
+						pn := extractNodeNameFromKey(string(kv.Key))
+						if pn != *nodeName && pn != "" {
+							remainingPeerNames = append(remainingPeerNames, pn)
 						}
 					}
 
-					// Reload TINC daemon with duration measurement
-					reloadStart := time.Now()
-					if err := tincManager.Reload(); err != nil {
-						log.Printf("⚠ Failed to reload tincd: %v", err)
+					// Step 3: Reconcile connections (TINC 1.0 file-based)
+					// Updates tinc.conf and reloads daemon
+					added, removed, err := tincManager.ReconcileConnections(remainingPeerNames)
+					if err != nil {
+						log.Printf("❌ Failed to reconcile connections: %v", err)
 						metrics.PeerSyncTotal.WithLabelValues("error", "DELETE").Inc()
 					} else {
-						metrics.TincReloadDuration.Observe(time.Since(reloadStart).Seconds())
+						log.Printf("✓ Connections reconciled after removing %s (added: %d, removed: %d)", deletedNodeName, added, removed)
 						metrics.PeerSyncTotal.WithLabelValues("success", "DELETE").Inc()
-						log.Printf("✓ Reloaded TINC daemon")
+
+						if removed > 0 {
+							metrics.TincConnectionOperations.WithLabelValues("remove", "success").Add(float64(removed))
+						}
+
+						// Display current topology
+						if *verbose {
+							currentConns, _ := tincManager.GetCurrentConnections()
+							log.Printf("📊 Current connections: %v", currentConns)
+							metrics.TincConnectionsActive.Set(float64(len(currentConns)))
+						}
 					}
 				}
 			}

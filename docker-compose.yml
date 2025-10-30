@@ -10,6 +10,9 @@ services:
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.1
+      - NODE_IP=10.0.0.1
+      - NODE_ID=1
+      - TOTAL_NODES=5
     restart: unless-stopped
     depends_on:
       - tinc1
@@ -23,6 +26,9 @@ services:
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.2
+      - NODE_IP=10.0.0.2
+      - NODE_ID=2
+      - TOTAL_NODES=5
     restart: unless-stopped
     depends_on:
       - tinc2
@@ -36,6 +42,9 @@ services:
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.3
+      - NODE_IP=10.0.0.3
+      - NODE_ID=3
+      - TOTAL_NODES=5
     restart: unless-stopped
     depends_on:
       - tinc3
@@ -49,6 +58,9 @@ services:
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.4
+      - NODE_IP=10.0.0.4
+      - NODE_ID=4
+      - TOTAL_NODES=5
     restart: unless-stopped
     depends_on:
       - tinc4
@@ -62,6 +74,9 @@ services:
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.5
+      - NODE_IP=10.0.0.5
+      - NODE_ID=5
+      - TOTAL_NODES=5
     restart: unless-stopped
     depends_on:
       - tinc5
@@ -72,12 +87,13 @@ services:
       dockerfile: ./docker/go-daemon/Dockerfile
     container_name: daemon1
     network_mode: "service:tinc1"
+    pid: "service:tinc1"
     volumes:
       - tinc1-data:/var/run/tinc
     environment:
       - NODE_NAME=node1
       - NODE_IP=10.0.0.1
-      - TINC_ENDPOINT=node1:655
+      - TINC_ENDPOINT=tinc1:655
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
       - >-
         ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,
@@ -99,12 +115,13 @@ services:
       dockerfile: ./docker/go-daemon/Dockerfile
     container_name: daemon2
     network_mode: "service:tinc2"
+    pid: "service:tinc2"
     volumes:
       - tinc2-data:/var/run/tinc
     environment:
       - NODE_NAME=node2
       - NODE_IP=10.0.0.2
-      - TINC_ENDPOINT=node2:655
+      - TINC_ENDPOINT=tinc2:655
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
       - >-
         ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,
@@ -126,12 +143,13 @@ services:
       dockerfile: ./docker/go-daemon/Dockerfile
     container_name: daemon3
     network_mode: "service:tinc3"
+    pid: "service:tinc3"
     volumes:
       - tinc3-data:/var/run/tinc
     environment:
       - NODE_NAME=node3
       - NODE_IP=10.0.0.3
-      - TINC_ENDPOINT=node3:655
+      - TINC_ENDPOINT=tinc3:655
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
       - >-
         ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,
@@ -153,12 +171,13 @@ services:
       dockerfile: ./docker/go-daemon/Dockerfile
     container_name: daemon4
     network_mode: "service:tinc4"
+    pid: "service:tinc4"
     volumes:
       - tinc4-data:/var/run/tinc
     environment:
       - NODE_NAME=node4
       - NODE_IP=10.0.0.4
-      - TINC_ENDPOINT=node4:655
+      - TINC_ENDPOINT=tinc4:655
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
       - >-
         ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,
@@ -180,12 +199,13 @@ services:
       dockerfile: ./docker/go-daemon/Dockerfile
     container_name: daemon5
     network_mode: "service:tinc5"
+    pid: "service:tinc5"
     volumes:
       - tinc5-data:/var/run/tinc
     environment:
       - NODE_NAME=node5
       - NODE_IP=10.0.0.5
-      - TINC_ENDPOINT=node5:655
+      - TINC_ENDPOINT=tinc5:655
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
       - >-
         ETCD_ENDPOINTS=etcd1:2379,etcd2:2379,etcd3:2379,
@@ -219,6 +239,7 @@ services:
       - etcd1
     networks:
       - mesh-net
+      - cluster-net
     environment:
       - TINC_NAME=node1
       - TINC_PORT=${TINC_PORT:-655}
@@ -240,6 +261,7 @@ services:
       - etcd1
     networks:
       - mesh-net
+      - cluster-net
     environment:
       - TINC_NAME=node2
       - TINC_PORT=${TINC_PORT:-655}
@@ -261,6 +283,7 @@ services:
       - etcd1
     networks:
       - mesh-net
+      - cluster-net
     environment:
       - TINC_NAME=node3
       - TINC_PORT=${TINC_PORT:-655}
@@ -284,6 +307,7 @@ services:
       - etcd1
     networks:
       - mesh-net
+      - cluster-net
     environment:
       - TINC_NAME=node4
       - TINC_PORT=${TINC_PORT:-655}
@@ -307,6 +331,7 @@ services:
       - etcd1
     networks:
       - mesh-net
+      - cluster-net
     environment:
       - TINC_NAME=node5
       - TINC_PORT=${TINC_PORT:-655}

@@ -1,0 +1,28 @@
+# BGP Peer Configurations
+# Peers over TINC mesh (10.0.0.0/24)
+# Dynamically generated from template
+#
+# Template variables:
+#   node_ip: This node's TINC IP (e.g., 10.0.0.1)
+#   node_id: This node's numeric ID (e.g., 1)
+#   bgp_as: BGP AS number (e.g., 65000)
+#   total_nodes: Total number of nodes in mesh (e.g., 5)
+#
+# Generated config creates N-1 BGP peers (full mesh topology)
+
+{% for peer_id in range(1, total_nodes + 1) %}
+{% if peer_id != node_id %}
+# Peer {{ loop.index }} (TINC IP: 10.0.0.{{ peer_id }})
+protocol bgp peer{{ loop.index }} {
+    description "BGP peer at 10.0.0.{{ peer_id }}";
+    local {{ node_ip }} as {{ bgp_as }};
+    neighbor 10.0.0.{{ peer_id }} as {{ bgp_as }};
+
+    ipv4 {
+        import all;
+        export all;
+    };
+}
+
+{% endif %}
+{% endfor %}

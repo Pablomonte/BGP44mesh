@@ -18,12 +18,14 @@ if [ -f "/var/run/tinc/bgpmesh/rsa_key.pub" ]; then
     PUBLIC_KEY=$(cat /var/run/tinc/bgpmesh/rsa_key.pub | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
 
     # Store complete peer info in etcd
+    # Use hostname (not tinc_name) for endpoint - must be DNS-resolvable
     etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} \
-        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ tinc_name }}:655\",\"key\":\"$PUBLIC_KEY\"}" || true
+        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ hostname }}:655\",\"key\":\"$PUBLIC_KEY\"}" || true
 else
     # Fallback: store minimal info if key not available yet
+    # Use hostname (not tinc_name) for endpoint - must be DNS-resolvable
     etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} \
-        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ tinc_name }}:655\"}" || true
+        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ hostname }}:655\"}" || true
 fi
 
 echo "TINC interface $INTERFACE configured: 10.0.0.{{ node_id }}/24, 2001:db8::{{ node_id }}/64"

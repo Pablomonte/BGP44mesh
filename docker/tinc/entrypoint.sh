@@ -45,6 +45,7 @@ if [ -f "$TINC_DIR/rsa_key.pub" ]; then
 # Host configuration for $TINC_NAME
 Address = $CONTAINER_NAME
 Port = $TINC_PORT
+Subnet = 10.0.0.$NODE_ID/32
 
 EOF
     cat "$TINC_DIR/rsa_key.pub" >> "$TINC_DIR/hosts/$TINC_NAME"
@@ -68,46 +69,11 @@ with open('$TINC_DIR/tinc.conf', 'w') as f:
 EOF
     echo "✓ tinc.conf rendered"
 
-    # Add bootstrap ConnectTo directives
-    # Strategy: All nodes connect to node1 for initial star topology
-    # Once daemon syncs host files, TINC will discover full mesh
+    # No bootstrap ConnectTo directives - daemon will manage connections dynamically
     echo ""
-    echo "Adding bootstrap ConnectTo directives..."
-
-    if [ "$TINC_NAME" != "node1" ]; then
-        # All nodes except node1 connect to node1
-        echo "ConnectTo = node1" >> "$TINC_DIR/tinc.conf"
-        echo "  - node1 (bootstrap hub)"
-    else
-        # node1 also connects to others for redundancy
-        echo "ConnectTo = node2" >> "$TINC_DIR/tinc.conf"
-        echo "ConnectTo = node3" >> "$TINC_DIR/tinc.conf"
-        echo "  - node2, node3 (bootstrap redundancy)"
-    fi
-
-    echo "✓ Bootstrap topology configured"
-
-    # Wait for daemons to sync host files from etcd
-    # Give other nodes time to register and daemons time to propagate
-    echo ""
-    echo "Waiting for host file propagation (10s)..."
-    sleep 10
-
-    # Check if we have host files for peers we're trying to connect to
-    MISSING_HOSTS=""
-    if [ "$TINC_NAME" != "node1" ]; then
-        [ ! -f "$TINC_DIR/hosts/node1" ] && MISSING_HOSTS="node1 $MISSING_HOSTS"
-    else
-        [ ! -f "$TINC_DIR/hosts/node2" ] && MISSING_HOSTS="node2 $MISSING_HOSTS"
-        [ ! -f "$TINC_DIR/hosts/node3" ] && MISSING_HOSTS="node3 $MISSING_HOSTS"
-    fi
-
-    if [ -n "$MISSING_HOSTS" ]; then
-        echo "⚠ Warning: Missing host files for: $MISSING_HOSTS"
-        echo "   TINC may not connect until daemon syncs these files"
-    else
-        echo "✓ All required host files present"
-    fi
+    echo "⚠ No initial ConnectTo directives"
+    echo "   Daemon will manage connections dynamically via CLI"
+    echo "✓ Bootstrap configuration ready"
 elif [ -f "$TINC_DIR/tinc.conf" ]; then
     echo "✓ Using existing tinc.conf"
 fi
@@ -121,7 +87,7 @@ from jinja2 import Template
 with open('/etc/tinc/tinc-up.j2', 'r') as f:
     template = Template(f.read())
 
-output = template.render(tinc_name='$TINC_NAME', node_id='$NODE_ID')
+output = template.render(tinc_name='$TINC_NAME', node_id='$NODE_ID', hostname='$(hostname)')
 
 with open('$TINC_DIR/tinc-up', 'w') as f:
     f.write(output)
