@@ -649,6 +649,47 @@ go test -v ./...
 go fmt ./...
 ```
 
+### Git Hooks & Pre-Commit Checks
+
+**Install Pre-Commit Hook** (recommended for all developers):
+```bash
+# One-time setup
+./scripts/install-hooks.sh
+```
+
+**What the pre-commit hook checks**:
+1. ✅ Go code formatting (`gofmt -s`)
+2. ✅ Go vet (static analysis)
+3. ✅ Unit tests pass
+
+**Manual pre-commit checks** (if not using hook):
+```bash
+cd daemon-go/
+
+# Check formatting
+gofmt -s -l .
+
+# Fix formatting
+gofmt -s -w .
+
+# Run vet
+make vet
+
+# Run unit tests
+make test-unit
+```
+
+**Skip hook temporarily** (not recommended):
+```bash
+git commit --no-verify -m "message"
+```
+
+**Why use pre-commit hooks**:
+- Prevents CI failures due to formatting/vet errors
+- Catches test failures before pushing
+- Saves time by running checks locally first
+- Maintains code quality consistently
+
 ## Troubleshooting
 
 ### TINC Not Connecting
