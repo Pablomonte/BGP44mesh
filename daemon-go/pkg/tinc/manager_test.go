@@ -82,7 +82,9 @@ func TestSyncHostFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := manager.SyncHostFile(tt.peer)
+			// Extract node name from peer (matches production logic)
+			nodeName := extractNodeName(tt.peer)
+			err := manager.SyncHostFile(nodeName, tt.peer)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -92,7 +94,6 @@ func TestSyncHostFile(t *testing.T) {
 			require.NoError(t, err)
 
 			// Verify file was created
-			nodeName := extractNodeName(tt.peer)
 			hostFile := filepath.Join(hostsDir, nodeName)
 			assert.FileExists(t, hostFile)
 
@@ -134,7 +135,8 @@ func TestSyncHostFile_InvalidPeer(t *testing.T) {
 		Key:      "test-key",
 	}
 
-	err = manager.SyncHostFile(peer)
+	// Pass empty nodeName to test error handling
+	err = manager.SyncHostFile("", peer)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing node name")
 }
