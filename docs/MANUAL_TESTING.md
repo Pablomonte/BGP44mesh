@@ -2,6 +2,50 @@
 
 Esta guía replica manualmente lo que hace el workflow de CI para debuggear problemas de integración.
 
+**Actualizado para Sprint 1.5** (Enero 2025)
+
+- ✅ 5 nodos en full mesh topology (antes 3)
+- ✅ BGP peers generados dinámicamente desde templates (protocols.conf.j2)
+- ✅ TINC con Subnet declarations para layer 2 (fix de ARP)
+- ✅ Tests escalables con detección automática de node count
+- ✅ Pre-commit hooks configurados (gofmt, go vet, tests)
+
+## Arquitectura Sprint 1.5 - Cambios Clave
+
+### Dynamic BGP Peer Configuration
+
+En lugar de hardcodear peers en `protocols.conf`, ahora usamos Jinja2 templates:
+
+- **Template**: `configs/bird/protocols.conf.j2`
+- **Variables**: `NODE_IP`, `NODE_ID`, `TOTAL_NODES` (desde docker-compose.yml)
+- **Resultado**: Cada nodo genera N-1 peers automáticamente (full mesh)
+
+Ejemplo para node1 (NODE_IP=10.0.0.1, TOTAL_NODES=5):
+
+```conf
+protocol bgp peer1 { local 10.0.0.1 as 65000; neighbor 10.0.0.2 as 65000; }
+protocol bgp peer2 { local 10.0.0.1 as 65000; neighbor 10.0.0.3 as 65000; }
+protocol bgp peer3 { local 10.0.0.1 as 65000; neighbor 10.0.0.4 as 65000; }
+protocol bgp peer4 { local 10.0.0.1 as 65000; neighbor 10.0.0.5 as 65000; }
+```
+
+### TINC Layer 2 Fix
+
+Agregamos `Subnet = IP/32` en host files para correcta resolución ARP:
+
+- **Sin Subnet**: ARP muestra `<incomplete>`, ping falla
+- **Con Subnet**: ARP muestra `REACHABLE`, ping 100% exitoso
+
+### Pre-Commit Hooks
+
+Instalados en `.git/hooks/pre-commit` para prevenir CI failures:
+
+1. ✅ Go formatting (`gofmt -s`)
+2. ✅ Go vet (static analysis)
+3. ✅ Unit tests
+
+Instalar en nuevos clones: `./scripts/install-hooks.sh`
+
 ## Prerequisitos
 
 ```bash
@@ -9,12 +53,16 @@ Esta guía replica manualmente lo que hace el workflow de CI para debuggear prob
 docker --version        # >= 24.0
 docker compose version  # v2.x
 etcdctl version        # Para queries manuales a etcd
+go version             # >= 1.23 (para daemon-go development)
 
 # Si falta etcdctl:
 ETCD_VER=v3.5.14
 wget https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-linux-amd64.tar.gz
 tar xzf etcd-${ETCD_VER}-linux-amd64.tar.gz
 sudo mv etcd-${ETCD_VER}-linux-amd64/etcdctl /usr/local/bin/
+
+# Instalar pre-commit hooks (opcional pero recomendado)
+./scripts/install-hooks.sh
 ```
 
 ## Paso 1: Preparación
@@ -141,8 +189,8 @@ docker exec tinc1 cat /var/run/tinc/bgpmesh/tinc.conf
 # Name = node1
 # Mode = switch
 # Port = 655
-# ConnectTo = node2
-# ConnectTo = node3
+# ConnectTo = node2  # Bootstrap topology - hardcoded in entrypoint.sh
+# ConnectTo = node3  # Node1 and node2 use hardcoded ConnectTo for initial mesh
 
 # Ver tinc.conf de node2
 docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf
@@ -151,12 +199,15 @@ docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf
 # Name = node2
 # Mode = switch
 # Port = 655
-# ConnectTo = node1
+# ConnectTo = node1  # Bootstrap node
 
-# Verificar que los ConnectTo estén presentes
+# Nota: A partir de node3, no hay ConnectTo hardcodeados
+# Los nodos 3-5 se conectan dinámicamente vía peer discovery
+
+# Verificar configuración en todos los nodos
 for i in {1..5}; do
   echo "=== Node $i ==="
-  docker exec tinc$i cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
+  docker exec tinc$i cat /var/run/tinc/bgpmesh/tinc.conf | grep -E "Name|Mode|Port|ConnectTo"
 done
 ```
 
@@ -172,11 +223,18 @@ docker exec tinc1 ls -la /var/run/tinc/bgpmesh/hosts/
 # Verificar contenido de un host file
 docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node2
 
-# Debería mostrar:
-# Address = tinc2
+# Debería mostrar (Sprint 1.5 - con Subnet declaration):
+# # Host configuration for node2
+# Address = node2
+# Port = 655
+# Subnet = 10.0.0.2/32
+#
 # -----BEGIN RSA PUBLIC KEY-----
 # MIIBCgKCAQEA...
 # -----END RSA PUBLIC KEY-----
+
+# IMPORTANTE: La línea "Subnet = 10.0.0.X/32" es CRÍTICA para layer 2
+# Sin ella, ARP resolution falla y el ping no funciona
 
 # Verificar en todos los nodos
 for i in {1..5}; do
@@ -217,7 +275,27 @@ done
 docker exec tinc1 ip route
 ```
 
-### 6.5 Test de Conectividad TINC (LA PRUEBA DEFINITIVA)
+### 6.5 Verificar ARP Resolution (Sprint 1.5 - Crítico)
+
+```bash
+# Verificar tabla ARP en tinc1
+docker exec tinc1 ip neigh show dev tinc0
+
+# Debería mostrar REACHABLE para todos los peers:
+# 10.0.0.2 lladdr XX:XX:XX:XX:XX:XX REACHABLE
+# 10.0.0.3 lladdr XX:XX:XX:XX:XX:XX REACHABLE
+# 10.0.0.4 lladdr XX:XX:XX:XX:XX:XX REACHABLE
+# 10.0.0.5 lladdr XX:XX:XX:XX:XX:XX REACHABLE
+
+# Si muestra "<incomplete>", falta la declaración Subnet en host files!
+# Verificar que TODOS los host files tienen Subnet:
+for i in {1..5}; do
+  echo "=== node$i host file ==="
+  docker exec tinc1 grep "Subnet" /var/run/tinc/bgpmesh/hosts/node$i
+done
+```
+
+### 6.6 Test de Conectividad TINC (LA PRUEBA DEFINITIVA)
 
 ```bash
 # Desde tinc1, ping a todos los demás
@@ -246,7 +324,7 @@ docker exec tinc1 ls -la /var/run/tinc/bgpmesh/hosts/node2
 docker logs tinc1 2>&1 | grep -i "error\|fail\|timeout\|refused"
 ```
 
-### 6.6 Timing Analysis
+### 6.7 Timing Analysis
 
 ```bash
 # Ver el orden temporal de eventos
@@ -260,6 +338,36 @@ docker logs tinc1 2>&1 | grep -E "Generating|rendered|ConnectTo|Waiting for host
 # 4. Waiting for host file propagation (10s)
 # 5. Starting TINC daemon
 # 6. interface configured
+```
+
+### 6.8 Full Mesh Ping Validation (Sprint 1.5)
+
+```bash
+# Test completo de conectividad full mesh (N×(N-1) pairs)
+# Para 5 nodos = 20 pings totales
+
+echo "=== Full Mesh Connectivity Test ==="
+TOTAL=0
+SUCCESS=0
+
+for src in {1..5}; do
+  for dst in {1..5}; do
+    if [ "$src" != "$dst" ]; then
+      TOTAL=$((TOTAL + 1))
+      if docker exec tinc$src ping -c 1 -W 2 10.0.0.$dst >/dev/null 2>&1; then
+        SUCCESS=$((SUCCESS + 1))
+        echo "✓ tinc$src -> 10.0.0.$dst"
+      else
+        echo "✗ tinc$src -> 10.0.0.$dst FAILED"
+      fi
+    fi
+  done
+done
+
+echo ""
+echo "Result: $SUCCESS/$TOTAL pings successful"
+
+# Para 5 nodos, deberías ver: 20/20 pings successful
 ```
 
 ## Paso 7: Verificar Daemon Go
@@ -292,14 +400,74 @@ docker exec daemon1 nc -zv etcd1 2379
 ### 8.1 Verificar Configuración
 
 ```bash
-# Ver configuración de BIRD1
+# Ver configuración principal de BIRD1
 docker exec bird1 cat /etc/bird/bird.conf | head -30
+
+# Ver configuración de peers (generada dinámicamente desde template)
+docker exec bird1 cat /var/run/bird/protocols.conf
+
+# Deberías ver N-1 peers (para 5 nodos, 4 peers):
+# protocol bgp peer1 {
+#     description "BGP peer at 10.0.0.2";
+#     local 10.0.0.1 as 65000;
+#     neighbor 10.0.0.2 as 65000;
+#     ...
+# }
+# protocol bgp peer2 { ... }
+# protocol bgp peer3 { ... }
+# protocol bgp peer4 { ... }
+
+# IMPORTANTE: protocols.conf se genera desde protocols.conf.j2
+# usando variables de entorno NODE_IP, NODE_ID, TOTAL_NODES
+
+# Verificar que cada nodo tiene su propia configuración única
+for i in {1..5}; do
+  echo "=== Bird $i - Local IP ==="
+  docker exec bird$i grep "local 10.0.0" /var/run/bird/protocols.conf | head -1
+done
 
 # Ver estado general
 docker exec bird1 birdc show status
 ```
 
-### 8.2 Verificar Protocolos BGP (LA PRUEBA FINAL)
+### 8.2 Verificar Template Rendering (Sprint 1.5)
+
+```bash
+# Ver variables de entorno usadas para rendering
+docker exec bird1 env | grep -E "NODE_IP|NODE_ID|TOTAL_NODES|BGP_AS"
+
+# Deberías ver:
+# NODE_IP=10.0.0.1
+# NODE_ID=1
+# TOTAL_NODES=5
+# BGP_AS=65000
+
+# Verificar que el template se renderizó correctamente
+docker exec bird1 ls -la /var/run/bird/protocols.conf
+
+# Ver el contenido generado
+docker exec bird1 cat /var/run/bird/protocols.conf | head -50
+
+# Contar cuántos peers se generaron
+docker exec bird1 grep -c "protocol bgp peer" /var/run/bird/protocols.conf
+
+# Debería ser N-1 (para 5 nodos = 4 peers)
+
+# Verificar que cada nodo tiene diferentes IPs locales
+for i in {1..5}; do
+  echo -n "bird$i local IP: "
+  docker exec bird$i grep "local 10.0.0" /var/run/bird/protocols.conf | head -1 | awk '{print $2}'
+done
+
+# Deberías ver:
+# bird1 local IP: 10.0.0.1
+# bird2 local IP: 10.0.0.2
+# bird3 local IP: 10.0.0.3
+# bird4 local IP: 10.0.0.4
+# bird5 local IP: 10.0.0.5
+```
+
+### 8.3 Verificar Protocolos BGP (LA PRUEBA FINAL)
 
 ```bash
 # Ver todos los protocolos en bird1
@@ -330,7 +498,35 @@ docker exec bird1 birdc show protocols all peer1 | grep -A 5 "BGP state"
 # - "Active" -> Intentando conectar (puede ser timing)
 ```
 
-### 8.3 Diagnóstico de Problemas BGP
+### 8.4 Full Mesh BGP Validation (Sprint 1.5)
+
+```bash
+# Verificar que TODOS los nodos tienen 4/4 sesiones BGP establecidas
+echo "=== Full Mesh BGP Session Validation ==="
+
+for i in {1..5}; do
+  ESTABLISHED=$(docker exec bird$i birdc show protocols 2>/dev/null | grep -c "Established" || echo "0")
+  EXPECTED=4  # N-1 para 5 nodos
+
+  if [ "$ESTABLISHED" -eq "$EXPECTED" ]; then
+    echo "✓ bird$i: $ESTABLISHED/$EXPECTED sessions established"
+  else
+    echo "✗ bird$i: $ESTABLISHED/$EXPECTED sessions (INCOMPLETE)"
+    docker exec bird$i birdc show protocols
+  fi
+done
+
+# Resultado esperado para 5 nodos:
+# ✓ bird1: 4/4 sessions established
+# ✓ bird2: 4/4 sessions established
+# ✓ bird3: 4/4 sessions established
+# ✓ bird4: 4/4 sessions established
+# ✓ bird5: 4/4 sessions established
+#
+# Total: 20 sesiones BGP (5 nodos × 4 peers cada uno)
+```
+
+### 8.5 Diagnóstico de Problemas BGP
 
 ```bash
 # Si BGP no establece:
@@ -425,13 +621,13 @@ echo ""
 # Test 5: BGP Sessions
 echo "Test 5: Verificando sesiones BGP..."
 ALL_OK=true
+EXPECTED=4  # Para 5 nodos, cada uno tiene 4 peers (full mesh)
 for i in {1..5}; do
   ESTABLISHED=$(docker exec bird$i birdc show protocols 2>/dev/null | grep -c "Established" || echo "0")
-  EXPECTED=$((5-1))  # Cada nodo tiene sesiones con los otros 4
-  if [ "$ESTABLISHED" -eq "$ESTABLISHED" ]; then
-    echo -e "  ${GREEN}✓${NC} bird$i: $ESTABLISHED BGP sessions established"
+  if [ "$ESTABLISHED" -eq "$EXPECTED" ]; then
+    echo -e "  ${GREEN}✓${NC} bird$i: $ESTABLISHED/$EXPECTED BGP sessions established"
   else
-    echo -e "  ${YELLOW}⚠${NC} bird$i: $ESTABLISHED BGP sessions (expected $EXPECTED)"
+    echo -e "  ${YELLOW}⚠${NC} bird$i: $ESTABLISHED/$EXPECTED BGP sessions (incomplete)"
     docker exec bird$i birdc show protocols
     ALL_OK=false
   fi
@@ -535,6 +731,94 @@ docker logs daemon1 | head -20
 # Solución: Agregar health checks o delays
 ```
 
+### Problema Sprint 1.5: Template rendering falló
+
+```bash
+# Verificar que el template existe
+docker exec bird1 ls -la /etc/bird/protocols.conf.j2
+
+# Verificar variables de entorno
+docker exec bird1 env | grep -E "NODE_|TOTAL_|BGP_"
+
+# Verificar que protocols.conf se generó
+docker exec bird1 ls -la /var/run/bird/protocols.conf
+
+# Si no existe, ver logs de entrypoint
+docker logs bird1 | grep -i "rendering\|template\|jinja"
+
+# Verificar Python y Jinja2 están instalados
+docker exec bird1 which python3
+docker exec bird1 python3 -c "import jinja2; print(jinja2.__version__)"
+
+# Re-generar manualmente para debugging
+docker exec bird1 python3 << 'EOF'
+from jinja2 import Template
+import os
+
+with open('/etc/bird/protocols.conf.j2', 'r') as f:
+    template = Template(f.read())
+
+output = template.render(
+    node_ip=os.environ.get('NODE_IP', '10.0.0.1'),
+    node_id=int(os.environ.get('NODE_ID', '1')),
+    bgp_as=os.environ.get('BGP_AS', '65000'),
+    total_nodes=int(os.environ.get('TOTAL_NODES', '5'))
+)
+print(output)
+EOF
+```
+
+### Problema Sprint 1.5: ARP muestra incomplete (falta Subnet)
+
+```bash
+# Verificar tabla ARP
+docker exec tinc1 ip neigh show dev tinc0
+
+# Si muestra "<incomplete>", verificar host files
+for i in {1..5}; do
+  echo "=== node$i ==="
+  docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node$i | grep -E "Address|Port|Subnet"
+done
+
+# Debería mostrar para cada host:
+# Address = nodeX
+# Port = 655
+# Subnet = 10.0.0.X/32
+
+# Si falta Subnet, verificar que manager.go tiene la línea:
+# content := fmt.Sprintf(`...
+# Subnet = %s/32
+# ...`, peer.IP.String())
+
+# Re-sync forzado (si el daemon está corriendo)
+docker restart daemon1 daemon2 daemon3 daemon4 daemon5
+
+# Esperar 10s y verificar de nuevo
+sleep 10
+docker exec tinc1 ip neigh show dev tinc0
+```
+
+### Problema Sprint 1.5: BGP tiene menos peers de los esperados
+
+```bash
+# Verificar cuántos peers se generaron en el config
+docker exec bird1 grep -c "protocol bgp peer" /var/run/bird/protocols.conf
+
+# Debería ser N-1 (para 5 nodos = 4)
+
+# Verificar TOTAL_NODES env var
+docker exec bird1 env | grep TOTAL_NODES
+
+# Si no está seteada o es incorrecta, verificar docker-compose.yml:
+grep -A 5 "bird1:" docker-compose.yml | grep TOTAL_NODES
+
+# Debería tener:
+# - TOTAL_NODES=5
+
+# Si es incorrecto, editar docker-compose.yml y rebuild
+docker compose up -d --build bird1 bird2 bird3 bird4 bird5
+```
+
 ## Limpieza
 
 ```bash
@@ -548,10 +832,61 @@ docker compose down -v
 docker compose down -v --rmi local
 ```
 
+## Paso 11: Interpretar Tests Automatizados (Sprint 1.5)
+
+Los tests automatizados ahora se adaptan dinámicamente al número de nodos:
+
+```bash
+# Ver el test automatizado de BGP peering
+cat tests/integration/test_bgp_peering.sh | grep -A 20 "NODE_COUNT"
+
+# El test detecta automáticamente cuántos nodos hay:
+NODE_COUNT=$(docker compose ps --services 2>/dev/null | grep -c "^bird" || echo 0)
+EXPECTED_PEERS=$((NODE_COUNT - 1))
+
+# Para 5 nodos:
+# - NODE_COUNT = 5
+# - EXPECTED_PEERS = 4
+# - Total BGP sessions = 20 (5 × 4)
+# - Total TINC pings = 20 (5 × 4)
+
+# Ejecutar el test completo
+make test-integration
+
+# O directamente:
+./tests/integration/test_bgp_peering.sh
+
+# Resultado esperado:
+# ✓ 5/5 containers running
+# ✓ etcd healthy, 5 peers registered
+# ✓ BGP: 20/20 sessions established
+# ✓ TINC: 20/20 pings successful
+# ✓ Full mesh connectivity validated
+```
+
+### Thresholds Dinámicos
+
+Los tests ahora usan thresholds que escalan con NODE_COUNT:
+
+```bash
+# Para N nodos, se verifican:
+EXPECTED_CONTAINERS=$((N * 4 + 1))  # N×(tinc+bird+daemon+etcd) + prometheus
+EXPECTED_BGP_SESSIONS=$((N * (N-1)))  # Full mesh bidireccional
+EXPECTED_PINGS=$((N * (N-1)))  # Full mesh connectivity
+
+# Ejemplos:
+# 3 nodos: 13 containers, 6 BGP sessions, 6 pings
+# 5 nodos: 21 containers, 20 BGP sessions, 20 pings
+# 10 nodos: 41 containers, 90 BGP sessions, 90 pings
+```
+
 ## Tips de Debugging
 
-1. **Siempre verificar en orden**: etcd -> host files -> TINC ping -> BGP
+1. **Siempre verificar en orden**: etcd -> host files -> TINC ping -> ARP -> BGP
 2. **Si BGP falla, NUNCA es BGP primero**: Siempre es TINC que no conectó
-3. **Timing matters**: Esperar 10-20s después de `docker compose up` antes de testear
-4. **Logs son tu amigo**: `docker logs -f` en otra terminal mientras debuggeas
-5. **Test incremental**: No testear BGP hasta que TINC ping funcione
+3. **Verificar Subnet declarations**: Sin `Subnet = IP/32`, ARP falla y ping no funciona
+4. **Timing matters**: Esperar 20-30s después de `docker compose up` antes de testear (para 5 nodos)
+5. **Logs son tu amigo**: `docker logs -f` en otra terminal mientras debuggeas
+6. **Test incremental**: No testear BGP hasta que TINC ping funcione
+7. **Pre-commit hooks**: Usar `./scripts/install-hooks.sh` para prevenir CI failures
+8. **Dynamic config**: Verificar que `protocols.conf` se generó con N-1 peers correctos
