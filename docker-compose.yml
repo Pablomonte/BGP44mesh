@@ -242,7 +242,8 @@ services:
     networks:
       - mesh-net
       - cluster-net
-      - isp-net
+      isp-net:
+        ipv4_address: 172.30.0.1
     environment:
       - TINC_NAME=node1
       - TINC_PORT=${TINC_PORT:-655}
