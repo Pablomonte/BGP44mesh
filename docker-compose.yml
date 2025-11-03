@@ -240,8 +240,8 @@ services:
     depends_on:
       - etcd1
     networks:
-      - mesh-net
-      - cluster-net
+      mesh-net:
+      cluster-net:
       isp-net:
         ipv4_address: 172.30.0.1
     environment:
