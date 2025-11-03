@@ -51,6 +51,8 @@ node_ip = os.environ.get('NODE_IP', '10.0.0.1')
 node_id = int(os.environ.get('NODE_ID', '1'))
 bgp_as = os.environ.get('BGP_AS', '65000')
 total_nodes = int(os.environ.get('TOTAL_NODES', '5'))
+isp_enabled = os.environ.get('ISP_ENABLED', 'false')
+isp_neighbor = os.environ.get('ISP_NEIGHBOR', '172.30.0.2')
 
 with open('/etc/bird/protocols.conf.j2', 'r') as f:
     template = Template(f.read())
@@ -59,7 +61,9 @@ output = template.render(
     node_ip=node_ip,
     node_id=node_id,
     bgp_as=bgp_as,
-    total_nodes=total_nodes
+    total_nodes=total_nodes,
+    isp_enabled=isp_enabled,
+    isp_neighbor=isp_neighbor
 )
 
 with open('/var/run/bird/protocols.conf', 'w') as f:
