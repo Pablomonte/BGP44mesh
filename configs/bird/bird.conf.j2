@@ -24,5 +24,7 @@ protocol static {
 }
 
 # Include additional configurations
-include "/etc/bird/protocols.conf";
+# Note: filters.conf must be included before protocols.conf
+# because protocols use the filters defined there
 include "/etc/bird/filters.conf";
+include "/etc/bird/protocols.conf";
