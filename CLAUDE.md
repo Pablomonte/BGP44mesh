@@ -770,7 +770,9 @@ If using Docker Desktop on macOS:
 - etcd encryption at rest (future: Sprint 4)
 - TINC key rotation via Ansible cron (future: Sprint 3)
 
-## Sprint 1 Success Metrics
+## Sprint 1 Success Metrics (October 2024 - 3 nodes)
+
+Initial deployment with 3-node topology:
 
 - [x] `make deploy-local` functional in <2min
 - [x] BGP sessions established (`birdc show protocols`)

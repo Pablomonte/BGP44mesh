@@ -1,6 +1,6 @@
 ### Introducción a la Estructura de Directorios y Documentación para el Proyecto BGP: Contexto Arquitectónico y Decisiones de Diseño
 
-La estructura de directorios propuesta para este proyecto BGP overlay sobre TINC mesh se diseña con un enfoque minimalista pero robusto, priorizando modularidad para facilitar el desarrollo local en Sprint 1 (3 nodos cada uno para BIRD, TINC y etcd, con monitoring via Prometheus/Grafana). El "por qué" de esta organización radica en la separación de preocupaciones: root para metadatos globales, docs para conocimiento persistente, docker para isolation de servicios (usando multi-stage builds para reducir image sizes ~20-30% en comparación con single-layer), configs para templates idempotentes (Jinja2 para parametrización dinámica, permitiendo overrides via Ansible vars sin editar archivos base), ansible para orquestación (roles atómicos para reusabilidad en prod scaling), daemon-go para lógica custom de propagación (estructurado en pkgs para testabilidad unitaria con go test -v), ci-cd para automation temprana (GitHub Actions para linting y basic tests, evitando regressions en early commits), y tests para validación end-to-end (bash scripts para simular peering sin dependencias externas pesadas). Trade-offs incluyen mayor nesting en subdirs (e.g., roles/bird/tasks) que aumenta path lengths pero mejora discoverability; limitaciones como potencial para config drifts si vars no se versionan, mitigadas con ansible --diff en Makefile validate. Consideraciones de rendimiento: En dev local (host con >8GB RAM), docker-compose up converge en <2min, con etcd quorum reads <10ms para propagación de peers TINC (keys RSA-2048 via tinc generate-keys). Edge cases: Conflicts en ports (e.g., BIRD 179 sobre TINC tun0); resuelve con networks custom en compose. Best practices: Sigue conventional layouts (e.g., Go src en cmd/pkg, Ansible Galaxy-compatible roles). Alternativas descartadas: Flat structure (pierde modularidad); monorepo con lerna (overkill para single-lang). Si tu host es macOS (con Docker Desktop quirks como slow volumes), ajusta con --platform linux/amd64 en Dockerfiles. Total archivos: 28 exactos, optimizados para quick bootstrap.
+La estructura de directorios propuesta para este proyecto BGP overlay sobre TINC mesh se diseña con un enfoque minimalista pero robusto, priorizando modularidad para facilitar el desarrollo local en Sprint 1 (inicialmente 3 nodos) y escalado en Sprint 1.5 a 5 nodos en full mesh (5 nodos cada uno para BIRD, TINC, daemon Go y etcd, con monitoring via Prometheus/Grafana). El "por qué" de esta organización radica en la separación de preocupaciones: root para metadatos globales, docs para conocimiento persistente, docker para isolation de servicios (usando multi-stage builds para reducir image sizes ~20-30% en comparación con single-layer), configs para templates idempotentes (Jinja2 para parametrización dinámica, permitiendo overrides via Ansible vars sin editar archivos base), ansible para orquestación (roles atómicos para reusabilidad en prod scaling), daemon-go para lógica custom de propagación (estructurado en pkgs para testabilidad unitaria con go test -v), ci-cd para automation temprana (GitHub Actions para linting y basic tests, evitando regressions en early commits), y tests para validación end-to-end (bash scripts para simular peering sin dependencias externas pesadas). Trade-offs incluyen mayor nesting en subdirs (e.g., roles/bird/tasks) que aumenta path lengths pero mejora discoverability; limitaciones como potencial para config drifts si vars no se versionan, mitigadas con ansible --diff en Makefile validate. Consideraciones de rendimiento: En dev local (host con >8GB RAM), docker-compose up converge en <2min, con etcd quorum reads <10ms para propagación de peers TINC (keys RSA-2048 via tinc generate-keys). Edge cases: Conflicts en ports (e.g., BIRD 179 sobre TINC tun0); resuelve con networks custom en compose. Best practices: Sigue conventional layouts (e.g., Go src en cmd/pkg, Ansible Galaxy-compatible roles). Alternativas descartadas: Flat structure (pierde modularidad); monorepo con lerna (overkill para single-lang). Si tu host es macOS (con Docker Desktop quirks como slow volumes), ajusta con --platform linux/amd64 en Dockerfiles. Total archivos: 28 exactos, optimizados para quick bootstrap.
 
 A continuación, detallo cada sección solicitada con precisión técnica, conectando componentes (e.g., tinc-up.j2 inyecta etcd puts para discovery, consumidos por mdns.go en daemon). Esto permite creación inmediata: copia el tree, popula con contenidos esqueleto, y ejecuta make deploy-local para un mesh funcional con BGP sessions over TINC, propagando routes IPv6 /48 con metric tuning en bird.filters.conf.
 
@@ -13,7 +13,7 @@ project-bgp/
 ├── .gitignore                  # Ignora artifacts efímeros como builds Go, env secrets, y Docker caches para mantener repo limpio y seguro; previene commits accidentales de keys TINC o AS BGP.
 ├── README.md                   # Overview general del proyecto, enlazando a QUICKSTART y decisions; sirve como entry point para nuevos devs, explicando stack (BIRD 3.x, TINC 1.0, etcd 3.5+).
 ├── Makefile                    # Automatiza workflows locales: build, deploy, test; usa GNU Make para portability, con targets paralelizables para speed en CI.
-├── docker-compose.yml          # Orquesta servicios locales: 3x bird/tinc/etcd + monitoring; define networks para simular TINC mesh over Docker bridge, volumes para persistencia de etcd data.
+├── docker-compose.yml          # Orquesta servicios locales: 5x bird/tinc/daemon/etcd + monitoring (21 containers total en Sprint 1.5); define networks para simular TINC mesh over Docker bridge, volumes para persistencia de etcd data.
 ├── .env.example                # Template para vars sensibles (e.g., BGP passwords, etcd endpoints); evita hardcoding, permitiendo overrides en .env local sin git track.
 ├── .editorconfig               # Estándares de formatting cross-editor (e.g., indent 4 para YAML/Ansible, 8 para Go); asegura consistencia en PRs, reduciendo diffs noise.
 ├── docs/                       # Directorio para documentación no-code; separado de root para evitar clutter, con git submodules potenciales para versioning.
@@ -93,7 +93,7 @@ project-bgp/
 - `.gitignore`: Contiene patrones específicos: `*.o` y `bgp-daemon` para Go builds; `.env` para secrets; `/vendor/` si go modules vendor; `*.log` y `/tmp/` para runtime artifacts; `Dockerfile*` no, pero `/build/` si custom; `roles/*/defaults/` no, pero añade `/etcd/data/` para persistencia. Propósito: Previene leaks de keys TINC o BGP auth, manteniendo repo <10MB.
 - `README.md`: Secciones: # Project BGP Overlay (overview con stack); ## Setup (link a QUICKSTART); ## Architecture (high-level: TINC L2 mesh -> BIRD BGP sessions -> etcd propagation); ## Contributing (placeholder); ## License (TBD). Incluye badges para CI status.
 - `Makefile`: Targets con comandos: `deploy-local: docker-compose up -d --build`; `test: ./tests/integration/test_bgp_peering.sh`; `monitor: open http://localhost:3000`; `clean: docker-compose down -v`; `validate: ansible-playbook site.yml --check --diff`; `help: @grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort`. Usa PHONY para no-file targets.
-- `docker-compose.yml`: Services: bird1-3 (build: ./docker/bird, ports: 179, volumes: ./configs/bird:/etc/bird, networks: mesh-net); tinc1-3 (similar, ports: 655/udp, depends_on: etcd); etcd1-3 (image: quay.io/coreos/etcd:v3.5.14, command: etcd --name etcd1 --initial-cluster etcd1=http://etcd1:2380,etcd2=..., volumes: ./etcd/data:/etcd.data, networks: cluster-net); prometheus (build: ./docker/monitoring, ports: 9090), grafana (ports: 3000, depends_on: prometheus). Networks: mesh-net (bridge), cluster-net (internal).
+- `docker-compose.yml`: (Sprint 1.5) Services: bird1-5 (build: ./docker/bird, ports: 179, volumes: ./configs/bird:/etc/bird, networks: mesh-net, environment: NODE_IP=10.0.0.X, NODE_ID=X, TOTAL_NODES=5, BGP_AS=${BGP_AS} para dynamic peer config); tinc1-5 (ports: 655/udp, cap_add: NET_ADMIN, devices: /dev/net/tun, volumes con Subnet declarations en host files para layer 2 ARP resolution); daemon1-5 (Go daemon para peer propagation via etcd); etcd1-5 (5-node cluster quorum); prometheus (build: ./docker/monitoring, ports: 9090, 3000 para Grafana). Total: 21 containers. Networks: mesh-net (bridge), cluster-net (internal).
 - `.env.example`: Vars: `BGP_AS=65000` (ej: 65001 para testing); `TINC_PORT=655`; `ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2379,etcd2=...`; `BIRD_PASSWORD=secret_md5`; `GRAFANA_ADMIN_PASSWORD=admin`. Comenta cada una con uso.
 - `.editorconfig`: Reglas: `root = true`; `[*.{yml,yaml}] indent_size=2`; `[*.go] indent_size=8, charset=utf-8`; `[*.sh] end_of_line=lf, indent_size=4`; `[*.j2] indent_size=2`. Asegura Go fmt compliance.
 
@@ -112,7 +112,7 @@ project-bgp/
 ### Configs (8):
 - `bird/bird.conf.j2`: Vars críticas: {{ router_id }}, {{ bgp_as }} (req); opc: {{ listen_port=179 }}. Lógica: protocol kernel { import all; export all; }.
 - `bird/filters.conf`: Static: filter export_peers { if net ~ [2001:db8::/48] then accept; reject; }. Crítico: prefix-lists para anti-hijack.
-- `bird/protocols.conf`: Static peers: protocol bgp peer1 { local as {{ bgp_as }}; neighbor 10.0.0.2 as 65001; password "{{ bgp_pass }}"; }.
+- `bird/protocols.conf.j2`: (Sprint 1.5) Dynamic peers: usa loop Jinja2 con range(1, total_nodes+1) para generar N-1 peers automáticamente basado en vars NODE_IP, NODE_ID, TOTAL_NODES desde docker-compose.yml. Reemplaza protocols.conf estático para escalabilidad.
 - `tinc/tinc.conf.j2`: Crítico: {{ Name=hostname }}, {{ Mode=switch }}; opc: {{ Cipher=AES-256-CBC }}.
 - `tinc/tinc-up.j2`: `ip link set $INTERFACE up mtu 1400; ip -6 addr add {{ ipv6_prefix }} dev $INTERFACE; etcdctl put /peers/{{ Name }} "$(tinc info)"`.
 - `tinc/tinc-down.j2`: `etcdctl del /peers/{{ Name }}; ip link set $INTERFACE down`.
@@ -160,7 +160,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 ```
 
-**docker-compose.yml (esqueleto extenso):**
+**docker-compose.yml (esqueleto Sprint 1.5 - 5 nodos):**
 ```
 version: '3.8'
 services:
@@ -171,7 +171,11 @@ services:
     networks: - mesh-net
     environment:
       - BGP_AS=${BGP_AS}
-  # bird2, bird3 similar
+      - NODE_IP=10.0.0.1       # Sprint 1.5: dynamic peer config
+      - NODE_ID=1
+      - TOTAL_NODES=5
+  # bird2, bird3, bird4, bird5 similar (change NODE_IP, NODE_ID)
+
   tinc1:
     build: ./docker/tinc
     ports: - "655:655/udp"
@@ -180,14 +184,23 @@ services:
     volumes: - ./configs/tinc:/etc/tinc
     depends_on: etcd1
     networks: - mesh-net
-  # tinc2, tinc3
+  # tinc2, tinc3, tinc4, tinc5 similar
+
+  daemon1:                    # Sprint 1.5: Go daemon para peer propagation
+    build: ./daemon-go
+    volumes: - /var/run/tinc:/var/run/tinc
+    networks: - mesh-net
+    depends_on: - etcd1 - tinc1
+  # daemon2-5 similar
+
   etcd1:
     image: quay.io/coreos/etcd:v3.5.14
-    command: etcd --name etcd1 --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd1:2379 --initial-advertise-peer-urls http://etcd1:2380 --initial-cluster etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+    command: etcd --name etcd1 --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd1:2379 --initial-advertise-peer-urls http://etcd1:2380 --initial-cluster etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380,etcd4=http://etcd4:2380,etcd5=http://etcd5:2380
     ports: - "2379:2379" - "2380:2380"
     volumes: - etcd1-data:/etcd.data
     networks: - cluster-net
-  # etcd2, etcd3
+  # etcd2-5 similar (5-node quorum)
+
   prometheus:
     build: ./docker/monitoring
     ports: - "9090:9090" - "3000:3000"
@@ -199,7 +212,10 @@ networks:
     internal: true
 volumes:
   etcd1-data:
-  # etcd2,3
+  etcd2-data:
+  etcd3-data:
+  etcd4-data:
+  etcd5-data:
 ```
 
 **QUICKSTART.md (esqueleto extenso):**
@@ -214,8 +230,8 @@ volumes:
 ## Setup
 1. git clone repo
 2. cp .env.example .env; edit BGP_AS=65001
-3. make deploy-local  # Builds and starts 3-node mesh
-4. Wait ~1min for convergence
+3. make deploy-local  # Builds and starts 5-node mesh (Sprint 1.5: 21 containers)
+4. Wait ~90-120s for convergence (5 nodes take longer)
 
 ## Verify
 - docker ps | grep up
