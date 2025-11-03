@@ -1,8 +1,17 @@
-.PHONY: deploy-local test monitor clean validate help status tinc-bootstrap
+.PHONY: deploy-local deploy-local-isp deploy-isp-only test monitor clean clean-isp validate help status tinc-bootstrap
 .PHONY: test-fast test-env test-configs test-builds test-integration test-e2e test-all
+.PHONY: test-isp-integrated test-isp-external
 
-deploy-local: ## Deploy local environment
+deploy-local: ## Deploy local environment (mesh only)
 	docker compose up -d --build
+
+deploy-local-isp: ## Deploy mesh + ISP (integrated mode)
+	@echo "=== Deploying mesh + ISP via profile ==="
+	ISP_ENABLED=true docker compose --profile isp up -d --build
+
+deploy-isp-only: ## Deploy standalone ISP
+	@echo "=== Deploying standalone ISP ==="
+	docker compose -f docker-compose.isp.yml up -d --build
 
 test: ## Run integration tests
 	./tests/integration/test_bgp_peering.sh
@@ -12,8 +21,16 @@ monitor: ## Open monitoring dashboard
 	@echo "Opening Prometheus at http://localhost:9090"
 	@xdg-open http://localhost:3000 2>/dev/null || open http://localhost:3000 2>/dev/null || echo "Please open http://localhost:3000 manually"
 
-clean: ## Clean up
+clean: ## Clean up mesh deployment
 	docker compose down -v
+
+clean-isp: ## Clean up ISP deployment (standalone)
+	docker compose -f docker-compose.isp.yml down -v
+
+clean-all: ## Clean up everything (mesh + ISP)
+	docker compose down -v
+	docker compose -f docker-compose.isp.yml down -v 2>/dev/null || true
+	docker network rm bgp-isp-net 2>/dev/null || true
 
 validate: ## Validate configs
 	@if [ -d ansible ]; then ansible-playbook ansible/site.yml --syntax-check; else echo "Ansible not yet implemented"; fi
@@ -38,7 +55,15 @@ test-integration: ## Run integration tests
 test-e2e: ## Run end-to-end tests
 	@./tests/e2e/test_full_stack.sh
 
+test-isp-integrated: ## Test mesh + ISP integration
+	@./tests/integration/test_isp_integrated.sh
+
+test-isp-external: ## Test with external ISP
+	@ISP_EXTERNAL=true ./tests/integration/test_isp_external.sh
+
 test-all: test-fast test-integration test-e2e ## Run all tests
+
+test-all-isp: test-fast test-integration test-isp-integrated ## Run all tests including ISP
 
 status: ## Show status of all containers
 	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "NAME|bird|tinc|etcd|prom"

@@ -13,6 +13,8 @@ services:
       - NODE_IP=10.0.0.1
       - NODE_ID=1
       - TOTAL_NODES=5
+      - ISP_ENABLED=${ISP_ENABLED:-false}
+      - ISP_NEIGHBOR=${ISP_NEIGHBOR:-172.30.0.2}
     restart: unless-stopped
     depends_on:
       - tinc1
@@ -240,6 +242,7 @@ services:
     networks:
       - mesh-net
       - cluster-net
+      - isp-net
     environment:
       - TINC_NAME=node1
       - TINC_PORT=${TINC_PORT:-655}
@@ -442,6 +445,23 @@ services:
       - cluster-net
     restart: unless-stopped
 
+  isp-bird:
+    profiles: ["isp"]
+    build: ./docker/bird
+    container_name: isp-bird
+    hostname: isp-bird
+    ports:
+      - "179"  # BGP port
+    volumes:
+      - ./configs/isp-bird:/etc/bird:ro
+    networks:
+      isp-net:
+        ipv4_address: 172.30.0.2
+    environment:
+      - BGP_AS=65001
+      - ROUTER_ID=192.0.2.100
+    restart: unless-stopped
+
   prometheus:
     build: ./docker/monitoring
     container_name: prometheus
@@ -466,6 +486,12 @@ networks:
   cluster-net:
     driver: bridge
     internal: true
+  isp-net:
+    name: bgp-isp-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   etcd1-data:

@@ -7,6 +7,8 @@
 #   node_id: This node's numeric ID (e.g., 1)
 #   bgp_as: BGP AS number (e.g., 65000)
 #   total_nodes: Total number of nodes in mesh (e.g., 5)
+#   isp_enabled: Enable ISP upstream (true/false, default: false)
+#   isp_neighbor: ISP BGP neighbor IP (default: 172.30.0.2)
 #
 # Generated config creates N-1 BGP peers (full mesh topology)
 
@@ -26,3 +28,21 @@ protocol bgp peer{{ loop.index }} {
 
 {% endif %}
 {% endfor %}
+
+# ISP Upstream (eBGP) - Only on border router (node1) when ISP is enabled
+{% if node_id == 1 and isp_enabled == 'true' %}
+protocol bgp isp {
+    description "ISP Upstream AS 65001";
+    local 172.30.0.1 as {{ bgp_as }};
+    neighbor {{ isp_neighbor }} as 65001;
+
+    ipv4 {
+        import filter import_from_isp;
+        export filter export_to_isp;
+    };
+
+    # BGP timers
+    hold time 90;
+    keepalive time 30;
+}
+{% endif %}
