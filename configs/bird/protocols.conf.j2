@@ -33,7 +33,7 @@ protocol bgp peer{{ loop.index }} {
 {% if node_id == 1 and isp_enabled == 'true' %}
 protocol bgp isp {
     description "ISP Upstream AS 65001";
-    local 172.30.0.1 as {{ bgp_as }};
+    local 172.30.0.3 as {{ bgp_as }};
     neighbor {{ isp_neighbor }} as 65001;
 
     ipv4 {
