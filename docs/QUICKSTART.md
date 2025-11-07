@@ -24,20 +24,20 @@ vim .env
 # Change BIRD_PASSWORD for BGP sessions
 ```
 
-### 2. Deploy Local 3-Node Mesh
+### 2. Deploy Local 5-Node Mesh (Sprint 1.5)
 
 ```bash
 make deploy-local
 ```
 
 This will:
-- Build 3 Docker images (BIRD, TINC, monitoring)
-- Start 9 containers (3 bird + 3 tinc + 3 etcd + 1 monitoring)
-- Bootstrap etcd cluster
-- Generate TINC keys
-- Configure BGP sessions
+- Build 4 Docker images (BIRD, TINC, daemon, prometheus)
+- Start 21 containers (5 bird + 5 tinc + 5 daemon + 5 etcd + 1 prometheus)
+- Bootstrap etcd cluster (5 nodes)
+- Generate TINC keys with Subnet declarations (layer 2 fix)
+- Configure BGP sessions dynamically (N-1 peers per node via templates)
 
-**Wait ~90 seconds** for convergence.
+**Wait ~90-120 seconds** for convergence (5 nodes take longer than 3).
 
 ### 3. Verify
 
@@ -45,9 +45,17 @@ This will:
 # Check all containers are running
 docker ps
 
-# Check BGP sessions
+# Check BGP sessions (Sprint 1.5: dynamic peers)
 docker exec bird1 birdc show protocols all
-# Should show "peer1" and "peer2" as "Established"
+# Should show 4 peers (peer1, peer2, peer3, peer4) as "Established"
+# Each node has N-1 peers (5 nodes = 4 peers per node)
+
+# Verify all 5 nodes have correct peer counts
+for i in {1..5}; do
+  echo "bird$i:"
+  docker exec bird$i birdc show protocols | grep -c "Established"
+done
+# Should show "4" for each node
 
 # Check TINC mesh
 docker exec tinc1 tinc -n bgpmesh info
@@ -193,15 +201,18 @@ df -h
 ```bash
 # Edit BIRD config template
 vim configs/bird/bird.conf.j2
+# Or edit dynamic peer template (Sprint 1.5)
+vim configs/bird/protocols.conf.j2
 
 # Validate
 make test-configs
 
-# Apply changes (restart containers)
-docker restart bird1 bird2 bird3
+# Apply changes (restart containers - all 5 nodes)
+docker restart bird1 bird2 bird3 bird4 bird5
 
 # Verify
 docker exec bird1 birdc show protocols
+# Should see 4/4 peers established
 ```
 
 ### Modify Docker Image
@@ -244,13 +255,21 @@ docker volume ls | grep bgp
 
 ## Next Steps
 
-After successful MVP deployment:
+After successful Sprint 1.5 deployment (5-node full mesh):
 
-1. **Explore monitoring**: Check Grafana dashboards
+1. **Explore monitoring**: Check Grafana dashboards (http://localhost:3000)
 2. **Experiment with configs**: Modify BGP policies in `configs/bird/filters.conf`
-3. **Run chaos tests**: Kill containers and observe reconvergence
-4. **Develop Go daemon**: See `daemon-go/README.md`
-5. **Prepare for Sprint 2**: Review Ansible roles for production deployment
+3. **Test dynamic scaling**: Add protocols.conf.j2 supports any N nodes
+4. **Run chaos tests**: Kill containers and observe reconvergence
+5. **Develop Go daemon**: See `daemon-go/README.md` - daemon handles peer propagation
+6. **Review manual testing**: See `docs/MANUAL_TESTING.md` for detailed debugging guide
+7. **Prepare for Sprint 2**: Review Ansible roles for production deployment
+
+**Sprint 1.5 Features:**
+- ✅ Dynamic BGP peer configuration (N-1 peers auto-generated)
+- ✅ TINC layer 2 fix (Subnet declarations for ARP resolution)
+- ✅ Pre-commit hooks (gofmt, go vet, tests) - run `./scripts/install-hooks.sh`
+- ✅ Scalable full mesh (tested with 5 nodes, 20 BGP sessions, 20 ping paths)
 
 ## Useful Commands
 

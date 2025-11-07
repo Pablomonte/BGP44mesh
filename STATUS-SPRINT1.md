@@ -1,10 +1,20 @@
 # BGP Network - Status Report Sprint 1
 
+> ⚠️ **DOCUMENTO HISTÓRICO** - Este documento describe el estado de Sprint 1 (3 nodos) del 28 de octubre de 2024.
+>
+> **TODOS LOS ISSUES CRÍTICOS HAN SIDO RESUELTOS EN SPRINT 1.5** (Noviembre 2024):
+> - ✅ TINC mesh connectivity: Resuelto con Subnet declarations en host files (fix de layer 2 ARP)
+> - ✅ BGP sessions: Resueltas con dynamic peer configuration via protocols.conf.j2
+> - ✅ Escalado a 5 nodos en full mesh (21 containers)
+> - ✅ 20/20 pings successful, 20/20 BGP sessions established
+>
+> Para el estado actual ver [docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md)
+
 **Fecha**: 2025-10-28
 **Branch**: master
 **Último Commit**: 555f057 (docs: add essential commands to README and Makefile)
 **Estado Git**: Clean working tree
-**Fase**: Sprint 1 MVP - **FUNCIONAL CON ISSUES CRÍTICOS**
+**Fase**: Sprint 1 MVP (3 nodos) - **FUNCIONAL CON ISSUES CRÍTICOS** → **RESUELTO EN SPRINT 1.5**
 
 ---
 

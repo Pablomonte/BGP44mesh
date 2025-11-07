@@ -159,16 +159,18 @@ Use **etcd** (v3.5.14+)
 
 ## ADR-004: Docker Compose over Kubernetes for Sprint 1
 
-**Date**: 2025-10-27
-**Status**: Accepted (Sprint 1 only)
+**Date**: 2025-10-27 (updated 2025-11-03 for Sprint 1.5)
+**Status**: Accepted (Sprint 1 & 1.5)
 
 ### Context
 
-Need local development orchestration for 9 services (3 bird + 3 tinc + 3 etcd + monitoring).
+Need local development orchestration for services:
+- **Sprint 1**: 9 services (3 bird + 3 tinc + 3 etcd + monitoring)
+- **Sprint 1.5**: 21 containers (5 bird + 5 tinc + 5 daemon + 5 etcd + prometheus)
 
 ### Decision
 
-Use **Docker Compose** for Sprint 1, migrate to **systemd** for production (Sprint 3+)
+Use **Docker Compose** for Sprint 1 & 1.5, migrate to **systemd** for production (Sprint 3+)
 
 ### Rationale
 

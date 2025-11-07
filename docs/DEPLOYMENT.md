@@ -8,7 +8,7 @@
 - >8GB RAM (>16GB for 5-node)
 - Linux kernel with TUN/TAP support
 
-### 3-Node Deployment
+### Local Deployment (Sprint 1.5 - 5 nodes)
 
 ```bash
 git clone https://github.com/pablomonte/bgp-network.git
@@ -17,27 +17,33 @@ cp .env.example .env
 make deploy-local
 ```
 
-Wait ~90s for convergence.
+Wait ~90-120s for convergence (5-node mesh).
 
-### 5-Node Deployment
+**Architecture**:
 
-Same commands. `docker-compose.yml` defaults to 5 nodes (15 containers).
+`docker-compose.yml` deploys a full mesh with **21 containers**:
+- 5x BIRD (BGP routing with dynamic peer configuration)
+- 5x TINC (VPN mesh with Subnet declarations for layer 2)
+- 5x etcd (distributed storage, 5-node cluster)
+- 5x daemon (Go automation for peer propagation)
+- 1x prometheus + grafana (monitoring)
 
-Containers:
-- 5x BIRD (BGP routing)
-- 5x TINC (VPN mesh)
-- 5x etcd (distributed storage)
-- 5x daemon (Go automation)
-- 1x prometheus + grafana
+Each BIRD node automatically configures **N-1 peers** (4 peers for 5 nodes) using the `protocols.conf.j2` template with environment variables (`NODE_IP`, `NODE_ID`, `TOTAL_NODES`).
 
 ### Verify Deployment
 
 ```bash
-docker ps                                    # Should show 15 running
-docker exec bird1 birdc show protocols       # BGP sessions
+docker ps                                    # Should show 21 running
+docker exec bird1 birdc show protocols       # BGP sessions (expect 4/4 Established)
 docker exec tinc1 ip addr show tinc0         # TINC interface
 docker exec etcd1 etcdctl endpoint health    # etcd cluster
 curl http://localhost:2112/metrics           # Daemon metrics (via tinc1)
+
+# Verify all nodes have correct peer counts (Sprint 1.5)
+for i in {1..5}; do
+  echo "bird$i: $(docker exec bird$i birdc show protocols | grep -c Established) peers"
+done
+# Should show "4 peers" for each node
 ```
 
 **Automated Key Distribution**:
@@ -60,10 +66,12 @@ TINC_NETNAME=bgpmesh
 TINC_PORT=655
 ```
 
-Restart affected services:
+Restart affected services (all 5 nodes):
 
 ```bash
-docker restart bird1 bird2 bird3
+docker restart bird1 bird2 bird3 bird4 bird5
+# Or restart all bird containers at once
+docker restart $(docker ps -q -f name=bird)
 ```
 
 ### Monitoring
