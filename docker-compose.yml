@@ -15,6 +15,7 @@ services:
       - TOTAL_NODES=5
       - ISP_ENABLED=${ISP_ENABLED:-false}
       - ISP_NEIGHBOR=${ISP_NEIGHBOR:-172.30.0.2}
+      - ISP_LOCAL_IP=${ISP_LOCAL_IP:-10.0.0.1}
     restart: unless-stopped
     depends_on:
       - tinc1
@@ -188,10 +189,13 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.22.0.0/16
   cluster-net:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16
   isp-net:
     name: bgp-isp-net
     driver: bridge
