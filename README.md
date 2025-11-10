@@ -36,6 +36,20 @@ make clean
 
 See [QUICKSTART.md](docs/QUICKSTART.md) for detailed instructions.
 
+### External ISP Integration
+
+To connect the mesh network to an external ISP:
+
+```bash
+# Configure .env with ISP settings (see docs for details)
+make deploy-with-external-isp
+
+# Verify BGP session
+make verify-isp
+```
+
+See [docs/EXTERNAL-ISP-INTEGRATION.md](docs/EXTERNAL-ISP-INTEGRATION.md) for complete ISP integration guide.
+
 ## Common Commands
 
 ```bash
