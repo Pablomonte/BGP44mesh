@@ -1,43 +1,30 @@
 # BGP Peer Configurations
-# Peers over TINC mesh (10.0.0.0/24)
-# Dynamically generated from template
+# Multi-homing to ISP with two uplinks
 #
 # Template variables:
-#   node_ip: This node's TINC IP (e.g., 10.0.0.1)
 #   node_id: This node's numeric ID (e.g., 1)
 #   bgp_as: BGP AS number (e.g., 65000)
-#   total_nodes: Total number of nodes in mesh (e.g., 5)
 #   isp_enabled: Enable ISP upstream (true/false, default: false)
-#   isp_neighbor: ISP BGP neighbor IP (default: 172.30.0.2)
 #
-# Generated config creates N-1 BGP peers (full mesh topology)
-
-{% for peer_id in range(1, total_nodes + 1) %}
-{% if peer_id != node_id %}
-# Peer {{ loop.index }} (TINC IP: 10.0.0.{{ peer_id }})
-protocol bgp peer{{ loop.index }} {
-    description "BGP peer at 10.0.0.{{ peer_id }}";
-    local {{ node_ip }} as {{ bgp_as }};
-    neighbor 10.0.0.{{ peer_id }} as {{ bgp_as }};
-
-    ipv4 {
-        import all;
-        export all;
-    };
-}
-
-{% endif %}
-{% endfor %}
+# Configuration creates two ISP uplinks with different preferences:
+# - isp_primary: Higher local-pref (200) via 172.30.0.0/24
+# - isp_secondary: Lower local-pref (150) via 172.31.0.0/24
 
 # ISP Upstream (eBGP) - Only on border router (node1) when ISP is enabled
 {% if node_id == 1 and isp_enabled == 'true' %}
-protocol bgp isp {
-    description "ISP Upstream AS 65001";
+
+# Primary ISP uplink (preferred path)
+protocol bgp isp_primary {
+    description "ISP Upstream AS 65001 (Primary - 172.30.0.0/24)";
     local 172.30.0.3 as {{ bgp_as }};
-    neighbor {{ isp_neighbor }} as 65001;
+    neighbor 172.30.0.2 as 65001;
 
     ipv4 {
-        import filter import_from_isp;
+        import filter {
+            bgp_local_pref = 200;  # Higher preference
+            print "Accepting ISP route ", net, " via primary link with local-pref 200";
+            accept;
+        };
         export filter export_to_isp;
     };
 
@@ -45,4 +32,25 @@ protocol bgp isp {
     hold time 90;
     keepalive time 30;
 }
+
+# Secondary ISP uplink (backup path)
+protocol bgp isp_secondary {
+    description "ISP Upstream AS 65001 (Secondary - 172.31.0.0/24)";
+    local 172.31.0.3 as {{ bgp_as }};
+    neighbor 172.31.0.2 as 65001;
+
+    ipv4 {
+        import filter {
+            bgp_local_pref = 150;  # Lower preference (backup)
+            print "Accepting ISP route ", net, " via secondary link with local-pref 150";
+            accept;
+        };
+        export filter export_to_isp;
+    };
+
+    # BGP timers
+    hold time 90;
+    keepalive time 30;
+}
+
 {% endif %}

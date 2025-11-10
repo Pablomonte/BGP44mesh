@@ -11,20 +11,20 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo "========================================"
-echo "Testing ISP Integrated Mode (Mesh + ISP)"
+echo "Testing ISP Multi-homing Mode"
 echo "========================================"
 echo ""
 
 # Test 1: Container count
 echo "Test 1: Verificando containers..."
-EXPECTED_CONTAINERS=22  # 21 mesh + 1 ISP
-RUNNING=$(docker ps --filter "status=running" | grep -c -E "bird|tinc|etcd|prom|daemon" || echo "0")
+EXPECTED_CONTAINERS=8  # 5 tinc + 1 bird + 1 ISP + 1 etcd
+RUNNING=$(docker ps --filter "status=running" | grep -c -E "bird|tinc|etcd" || echo "0")
 
 if [ "$RUNNING" -eq "$EXPECTED_CONTAINERS" ]; then
     echo -e "  ${GREEN}✓${NC} All $EXPECTED_CONTAINERS containers running"
 else
     echo -e "  ${RED}✗${NC} Expected $EXPECTED_CONTAINERS containers, found $RUNNING"
-    docker ps --filter "name=bird" --filter "name=tinc" --filter "name=etcd" --filter "name=prom"
+    docker ps --filter "name=bird" --filter "name=tinc" --filter "name=etcd"
     exit 1
 fi
 
@@ -37,83 +37,72 @@ else
     exit 1
 fi
 
-# Test 3: bird1 has 5 BGP peers (4 mesh + 1 ISP)
-echo "Test 3: Verificando bird1 BGP peers (mesh + ISP)..."
+# Test 3: bird1 has 2 BGP peers (both to ISP via multi-homing)
+echo "Test 3: Verificando bird1 BGP peers (multi-homing to ISP)..."
 BIRD1_PEERS=$(docker exec bird1 birdc show protocols 2>/dev/null | grep -c "Established" || echo "0")
-EXPECTED_BIRD1_PEERS=5  # 4 mesh peers + 1 ISP peer
+EXPECTED_BIRD1_PEERS=2  # 2 ISP uplinks
 
 if [ "$BIRD1_PEERS" -eq "$EXPECTED_BIRD1_PEERS" ]; then
-    echo -e "  ${GREEN}✓${NC} bird1: $BIRD1_PEERS/$EXPECTED_BIRD1_PEERS peers established"
+    echo -e "  ${GREEN}✓${NC} bird1: $BIRD1_PEERS/$EXPECTED_BIRD1_PEERS peers established (multi-homing)"
 else
-    echo -e "  ${YELLOW}⚠${NC} bird1: $BIRD1_PEERS/$EXPECTED_BIRD1_PEERS peers (expected 4 mesh + 1 ISP)"
+    echo -e "  ${YELLOW}⚠${NC} bird1: $BIRD1_PEERS/$EXPECTED_BIRD1_PEERS peers (expected 2 ISP uplinks)"
     docker exec bird1 birdc show protocols
     exit 1
 fi
 
-# Test 4: ISP has 1 BGP peer (customer)
-echo "Test 4: Verificando ISP BGP peer..."
+# Test 4: ISP has 2 BGP peers (customer multi-homing)
+echo "Test 4: Verificando ISP BGP peers..."
 ISP_PEERS=$(docker exec isp-bird birdc show protocols 2>/dev/null | grep -c "Established" || echo "0")
 
-if [ "$ISP_PEERS" -eq 1 ]; then
-    echo -e "  ${GREEN}✓${NC} ISP: 1/1 customer peer established"
+if [ "$ISP_PEERS" -eq 2 ]; then
+    echo -e "  ${GREEN}✓${NC} ISP: 2/2 customer peers established (multi-homing)"
 else
-    echo -e "  ${RED}✗${NC} ISP: $ISP_PEERS/1 peers"
+    echo -e "  ${RED}✗${NC} ISP: $ISP_PEERS/2 peers"
     docker exec isp-bird birdc show protocols
     exit 1
 fi
 
-# Test 5: Mesh BGP sessions (bird2-5 still have 4 peers each)
-echo "Test 5: Verificando mesh BGP sessions..."
-EXPECTED_MESH_PEERS=4
-ALL_OK=true
+echo "Test 5: Verificando propagación de rutas ISP..."
+# Check if bird1 has ISP routes via both uplinks
+ISP_PRIMARY_ROUTES=$(docker exec bird1 birdc show route protocol isp_primary 2>/dev/null | grep -c "192.0.2.0/24\|198.51.100.0/24\|203.0.113.0/24" || echo "0")
+ISP_SECONDARY_ROUTES=$(docker exec bird1 birdc show route protocol isp_secondary 2>/dev/null | grep -c "192.0.2.0/24\|198.51.100.0/24\|203.0.113.0/24" || echo "0")
 
-for i in {2..5}; do
-    ESTABLISHED=$(docker exec bird$i birdc show protocols 2>/dev/null | grep -c "Established" || echo "0")
-    if [ "$ESTABLISHED" -eq "$EXPECTED_MESH_PEERS" ]; then
-        echo -e "  ${GREEN}✓${NC} bird$i: $ESTABLISHED/$EXPECTED_MESH_PEERS peers established"
-    else
-        echo -e "  ${YELLOW}⚠${NC} bird$i: $ESTABLISHED/$EXPECTED_MESH_PEERS peers"
-        ALL_OK=false
-    fi
-done
-
-if ! $ALL_OK; then
-    echo "Some mesh BGP sessions incomplete"
-    exit 1
+if [ "$ISP_PRIMARY_ROUTES" -ge 1 ]; then
+    echo -e "  ${GREEN}✓${NC} bird1 receives ISP routes via primary link ($ISP_PRIMARY_ROUTES prefixes)"
+else
+    echo -e "  ${YELLOW}⚠${NC} bird1 not receiving ISP routes via primary link"
+    docker exec bird1 birdc show route protocol isp_primary
 fi
 
-# Test 6: ISP routes are received on mesh nodes
-echo "Test 6: Verificando propagación de rutas ISP..."
-# Check if bird1 has ISP routes
-ISP_ROUTES=$(docker exec bird1 birdc show route protocol isp 2>/dev/null | grep -c "192.0.2.0/24\|198.51.100.0/24\|203.0.113.0/24" || echo "0")
-
-if [ "$ISP_ROUTES" -ge 1 ]; then
-    echo -e "  ${GREEN}✓${NC} bird1 receives ISP routes ($ISP_ROUTES prefixes)"
+if [ "$ISP_SECONDARY_ROUTES" -ge 1 ]; then
+    echo -e "  ${GREEN}✓${NC} bird1 receives ISP routes via secondary link ($ISP_SECONDARY_ROUTES prefixes)"
 else
-    echo -e "  ${YELLOW}⚠${NC} bird1 not receiving ISP routes"
-    docker exec bird1 birdc show route protocol isp
+    echo -e "  ${YELLOW}⚠${NC} bird1 not receiving ISP routes via secondary link"
+    docker exec bird1 birdc show route protocol isp_secondary
 fi
 
-# Check if bird2 has ISP routes (via iBGP from bird1)
-BIRD2_ISP_ROUTES=$(docker exec bird2 birdc show route 2>/dev/null | grep -c "192.0.2.0/24\|198.51.100.0/24\|203.0.113.0/24" || echo "0")
+# Test 6: Verify local-pref for multi-homing (primary should be preferred)
+echo "Test 6: Verificando local-pref para multi-homing..."
+# Check that routes learned from primary have higher local-pref
+PRIMARY_PREF=$(docker exec bird1 birdc show route all 192.0.2.0/24 2>/dev/null | grep "BGP.local_pref:" | head -1 | awk '{print $2}' || echo "0")
 
-if [ "$BIRD2_ISP_ROUTES" -ge 1 ]; then
-    echo -e "  ${GREEN}✓${NC} bird2 receives ISP routes via iBGP ($BIRD2_ISP_ROUTES prefixes)"
+if [ "$PRIMARY_PREF" -eq 200 ]; then
+    echo -e "  ${GREEN}✓${NC} Primary link has correct local-pref (200)"
 else
-    echo -e "  ${YELLOW}⚠${NC} bird2 not receiving ISP routes via iBGP"
+    echo -e "  ${YELLOW}⚠${NC} Primary link local-pref is $PRIMARY_PREF (expected 200)"
 fi
 
 # Test 7: Verify filter is blocking TINC mesh prefix from ISP
 echo "Test 7: Verificando filtros de export a ISP..."
-# Check ISP routes - should NOT have 10.0.0.0/24 (TINC mesh)
+# Check ISP routes - should NOT have 44.30.127.0/24 (TINC mesh)
 ISP_ROUTES_ALL=$(docker exec isp-bird birdc show route 2>/dev/null)
 
-if echo "$ISP_ROUTES_ALL" | grep -q "10.0.0.0/24"; then
-    echo -e "  ${RED}✗${NC} ISP received internal mesh route 10.0.0.0/24 (should be blocked)"
+if echo "$ISP_ROUTES_ALL" | grep -q "44.30.127.0/24"; then
+    echo -e "  ${RED}✗${NC} ISP received internal mesh route 44.30.127.0/24 (should be blocked)"
     echo "$ISP_ROUTES_ALL"
     exit 1
 else
-    echo -e "  ${GREEN}✓${NC} TINC mesh route 10.0.0.0/24 correctly blocked from ISP"
+    echo -e "  ${GREEN}✓${NC} TINC mesh route 44.30.127.0/24 correctly blocked from ISP"
 fi
 
 # Test 8: Network connectivity
@@ -131,14 +120,14 @@ fi
 
 echo ""
 echo "========================================="
-echo -e "${GREEN}✓ All ISP integrated tests passed!${NC}"
+echo -e "${GREEN}✓ All ISP multi-homing tests passed!${NC}"
 echo "========================================="
 echo ""
 echo "Summary:"
-echo "  - 22 containers running (21 mesh + 1 ISP)"
-echo "  - bird1: 5 BGP peers (4 mesh + 1 ISP)"
-echo "  - bird2-5: 4 BGP peers each (mesh only)"
-echo "  - ISP: 1 BGP peer (customer)"
-echo "  - ISP routes propagated to mesh"
+echo "  - 8 containers running (5 TINC + 1 BIRD + 1 ISP + 1 etcd)"
+echo "  - bird1: 2 BGP peers (both to ISP via multi-homing)"
+echo "  - ISP: 2 BGP peers (both from customer)"
+echo "  - ISP routes received via both uplinks"
+echo "  - Primary link preferred (local-pref 200 > 150)"
 echo "  - TINC mesh prefix blocked from ISP"
 echo ""

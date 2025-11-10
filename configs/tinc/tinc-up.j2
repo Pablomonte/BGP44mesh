@@ -6,7 +6,7 @@
 ip link set $INTERFACE up mtu 1400
 
 # Configure IPv4 address
-ip addr add 10.0.0.{{ node_id }}/24 dev $INTERFACE
+ip addr add 44.30.127.{{ node_id }}/24 dev $INTERFACE
 
 # Configure IPv6 address
 ip -6 addr add 2001:db8::{{ node_id }}/64 dev $INTERFACE
@@ -20,12 +20,12 @@ if [ -f "/var/run/tinc/bgpmesh/rsa_key.pub" ]; then
     # Store complete peer info in etcd
     # Use hostname (not tinc_name) for endpoint - must be DNS-resolvable
     etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} \
-        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ hostname }}:655\",\"key\":\"$PUBLIC_KEY\"}" || true
+        "{\"ip\":\"44.30.127.{{ node_id }}\",\"endpoint\":\"{{ hostname }}:655\",\"key\":\"$PUBLIC_KEY\"}" || true
 else
     # Fallback: store minimal info if key not available yet
     # Use hostname (not tinc_name) for endpoint - must be DNS-resolvable
     etcdctl --endpoints=http://etcd1:2379 put /peers/{{ tinc_name }} \
-        "{\"ip\":\"10.0.0.{{ node_id }}\",\"endpoint\":\"{{ hostname }}:655\"}" || true
+        "{\"ip\":\"44.30.127.{{ node_id }}\",\"endpoint\":\"{{ hostname }}:655\"}" || true
 fi
 
-echo "TINC interface $INTERFACE configured: 10.0.0.{{ node_id }}/24, 2001:db8::{{ node_id }}/64"
+echo "TINC interface $INTERFACE configured: 44.30.127.{{ node_id }}/24, 2001:db8::{{ node_id }}/64"

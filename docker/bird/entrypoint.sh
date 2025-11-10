@@ -8,7 +8,7 @@ echo "============================================"
 # Environment variables with defaults
 ROUTER_ID="${ROUTER_ID:-192.0.2.1}"
 BGP_AS="${BGP_AS:-65000}"
-NODE_IP="${NODE_IP:-10.0.0.1}"
+NODE_IP="${NODE_IP:-44.30.127.1}"
 NODE_ID="${NODE_ID:-1}"
 TOTAL_NODES="${TOTAL_NODES:-5}"
 
@@ -47,7 +47,7 @@ from jinja2 import Template
 import sys
 import os
 
-node_ip = os.environ.get('NODE_IP', '10.0.0.1')
+node_ip = os.environ.get('NODE_IP', '44.30.127.1')
 node_id = int(os.environ.get('NODE_ID', '1'))
 bgp_as = os.environ.get('BGP_AS', '65000')
 total_nodes = int(os.environ.get('TOTAL_NODES', '5'))
