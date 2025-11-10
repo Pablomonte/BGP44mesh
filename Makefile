@@ -1,4 +1,4 @@
-.PHONY: deploy-local deploy-local-isp deploy-isp-only test monitor clean clean-isp validate help status tinc-bootstrap
+.PHONY: deploy-local deploy-local-isp deploy-isp-only deploy-with-external-isp verify-isp test monitor clean clean-isp validate help status tinc-bootstrap
 .PHONY: test-fast test-env test-configs test-builds test-integration test-e2e test-all
 .PHONY: test-isp-integrated test-isp-external
 
@@ -12,6 +12,18 @@ deploy-local-isp: ## Deploy mesh + ISP (integrated mode)
 deploy-isp-only: ## Deploy standalone ISP
 	@echo "=== Deploying standalone ISP ==="
 	docker compose -f docker-compose.isp.yml up -d --build
+
+deploy-with-external-isp: ## Deploy mesh with external ISP (for Host B)
+	@echo "=== Deploying mesh with external ISP connectivity ==="
+	@echo "Make sure ISP_ENABLED=true and ISP_NEIGHBOR=<Host_A_IP> are set in .env"
+	docker compose -f docker-compose.yml -f docker-compose.external-isp.yml up -d --build
+
+verify-isp: ## Verify external ISP BGP session
+	@echo "=== Verifying ISP BGP session ==="
+	@docker exec bird1 birdc show protocols isp
+	@echo ""
+	@echo "=== ISP routes received ==="
+	@docker exec bird1 birdc show route protocol isp
 
 test: ## Run integration tests
 	./tests/integration/test_bgp_peering.sh
