@@ -9,13 +9,9 @@ services:
     build: ./docker/bird
     container_name: isp-bird
     hostname: isp-bird
-    ports:
-      - "179:179"  # BGP port exposed
+    network_mode: host  # Use host networking to access eth0 directly
     volumes:
       - ./configs/isp-bird:/etc/bird:ro
-    networks:
-      isp-net:
-        ipv4_address: 172.30.0.2
     environment:
       - BGP_AS=65001
       - ROUTER_ID=192.0.2.100
@@ -25,11 +21,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-networks:
-  isp-net:
-    name: bgp-isp-net
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.0.0/24
