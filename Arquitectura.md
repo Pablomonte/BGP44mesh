@@ -1,6 +1,6 @@
 ### Introducción a la Estructura de Directorios y Documentación para el Proyecto BGP: Contexto Arquitectónico y Decisiones de Diseño
 
-La estructura de directorios propuesta para este proyecto BGP overlay sobre TINC mesh se diseña con un enfoque minimalista pero robusto, priorizando modularidad para facilitar el desarrollo local en Sprint 1 (inicialmente 3 nodos) y escalado en Sprint 1.5 a 5 nodos en full mesh (5 nodos cada uno para BIRD, TINC, daemon Go y etcd, con monitoring via Prometheus/Grafana). El "por qué" de esta organización radica en la separación de preocupaciones: root para metadatos globales, docs para conocimiento persistente, docker para isolation de servicios (usando multi-stage builds para reducir image sizes ~20-30% en comparación con single-layer), configs para templates idempotentes (Jinja2 para parametrización dinámica, permitiendo overrides via Ansible vars sin editar archivos base), ansible para orquestación (roles atómicos para reusabilidad en prod scaling), daemon-go para lógica custom de propagación (estructurado en pkgs para testabilidad unitaria con go test -v), ci-cd para automation temprana (GitHub Actions para linting y basic tests, evitando regressions en early commits), y tests para validación end-to-end (bash scripts para simular peering sin dependencias externas pesadas). Trade-offs incluyen mayor nesting en subdirs (e.g., roles/bird/tasks) que aumenta path lengths pero mejora discoverability; limitaciones como potencial para config drifts si vars no se versionan, mitigadas con ansible --diff en Makefile validate. Consideraciones de rendimiento: En dev local (host con >8GB RAM), docker-compose up converge en <2min, con etcd quorum reads <10ms para propagación de peers TINC (keys RSA-2048 via tinc generate-keys). Edge cases: Conflicts en ports (e.g., BIRD 179 sobre TINC tun0); resuelve con networks custom en compose. Best practices: Sigue conventional layouts (e.g., Go src en cmd/pkg, Ansible Galaxy-compatible roles). Alternativas descartadas: Flat structure (pierde modularidad); monorepo con lerna (overkill para single-lang). Si tu host es macOS (con Docker Desktop quirks como slow volumes), ajusta con --platform linux/amd64 en Dockerfiles. Total archivos: 28 exactos, optimizados para quick bootstrap.
+La estructura de directorios propuesta para este proyecto BGP overlay sobre TINC mesh se diseña con un enfoque minimalista pero robusto. **Arquitectura actual (Nov 2025)**: Single border router con ISP multi-homing (8 containers: 5 TINC VPN + 1 BIRD border router + 1 ISP mock + 1 etcd). Simplificación de arquitectura anterior (22 containers con full mesh iBGP) para focus en escenario real: multi-homing con dual uplinks BGP (local-pref 200 primary, 150 backup). El "por qué" de esta organización radica en la separación de preocupaciones: root para metadatos globales, docs para conocimiento persistente, docker para isolation de servicios (usando multi-stage builds para reducir image sizes ~20-30% en comparación con single-layer), configs para templates idempotentes (Jinja2 para parametrización dinámica, permitiendo overrides via Ansible vars sin editar archivos base), ansible para orquestación (roles atómicos para reusabilidad en prod scaling), daemon-go para lógica custom de propagación (estructurado en pkgs para testabilidad unitaria con go test -v), ci-cd para automation temprana (GitHub Actions para linting y basic tests, evitando regressions en early commits), y tests para validación end-to-end (bash scripts para simular peering sin dependencias externas pesadas). Trade-offs incluyen mayor nesting en subdirs (e.g., roles/bird/tasks) que aumenta path lengths pero mejora discoverability; limitaciones como potencial para config drifts si vars no se versionan, mitigadas con ansible --diff en Makefile validate. Consideraciones de rendimiento: En dev local (host con >8GB RAM), docker-compose up converge en <2min, con etcd quorum reads <10ms para propagación de peers TINC (keys RSA-2048 via tinc generate-keys). Edge cases: Conflicts en ports (e.g., BIRD 179 sobre TINC tun0); resuelve con networks custom en compose. Best practices: Sigue conventional layouts (e.g., Go src en cmd/pkg, Ansible Galaxy-compatible roles). Alternativas descartadas: Flat structure (pierde modularidad); monorepo con lerna (overkill para single-lang). Si tu host es macOS (con Docker Desktop quirks como slow volumes), ajusta con --platform linux/amd64 en Dockerfiles. Total archivos: 28 exactos, optimizados para quick bootstrap.
 
 A continuación, detallo cada sección solicitada con precisión técnica, conectando componentes (e.g., tinc-up.j2 inyecta etcd puts para discovery, consumidos por mdns.go en daemon). Esto permite creación inmediata: copia el tree, popula con contenidos esqueleto, y ejecuta make deploy-local para un mesh funcional con BGP sessions over TINC, propagando routes IPv6 /48 con metric tuning en bird.filters.conf.
 
@@ -93,7 +93,7 @@ project-bgp/
 - `.gitignore`: Contiene patrones específicos: `*.o` y `bgp-daemon` para Go builds; `.env` para secrets; `/vendor/` si go modules vendor; `*.log` y `/tmp/` para runtime artifacts; `Dockerfile*` no, pero `/build/` si custom; `roles/*/defaults/` no, pero añade `/etcd/data/` para persistencia. Propósito: Previene leaks de keys TINC o BGP auth, manteniendo repo <10MB.
 - `README.md`: Secciones: # Project BGP Overlay (overview con stack); ## Setup (link a QUICKSTART); ## Architecture (high-level: TINC L2 mesh -> BIRD BGP sessions -> etcd propagation); ## Contributing (placeholder); ## License (TBD). Incluye badges para CI status.
 - `Makefile`: Targets con comandos: `deploy-local: docker-compose up -d --build`; `test: ./tests/integration/test_bgp_peering.sh`; `monitor: open http://localhost:3000`; `clean: docker-compose down -v`; `validate: ansible-playbook site.yml --check --diff`; `help: @grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort`. Usa PHONY para no-file targets.
-- `docker-compose.yml`: (Sprint 1.5) Services: bird1-5 (build: ./docker/bird, ports: 179, volumes: ./configs/bird:/etc/bird, networks: mesh-net, environment: NODE_IP=10.0.0.X, NODE_ID=X, TOTAL_NODES=5, BGP_AS=${BGP_AS} para dynamic peer config); tinc1-5 (ports: 655/udp, cap_add: NET_ADMIN, devices: /dev/net/tun, volumes con Subnet declarations en host files para layer 2 ARP resolution); daemon1-5 (Go daemon para peer propagation via etcd); etcd1-5 (5-node cluster quorum); prometheus (build: ./docker/monitoring, ports: 9090, 3000 para Grafana). Total: 21 containers. Networks: mesh-net (bridge), cluster-net (internal).
+- `docker-compose.yml`: **Current (Multi-homing)**: bird1 (único border router, network_mode: service:tinc1, 2 BGP sessions al ISP); tinc1-5 (VPN mesh 44.30.127.0/24, tinc1 con IPs adicionales en redes ISP); etcd1 (single node para TINC peer discovery); isp-bird (mock ISP con dual BGP sessions, profiles: ["isp"]). Total: 8 containers. Networks: mesh-net (TINC), cluster-net (etcd), isp-net (172.30.0.0/24 primary), isp-net-2 (172.31.0.0/24 secondary).
 - `.env.example`: Vars: `BGP_AS=65000` (ej: 65001 para testing); `TINC_PORT=655`; `ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2379,etcd2=...`; `BIRD_PASSWORD=secret_md5`; `GRAFANA_ADMIN_PASSWORD=admin`. Comenta cada una con uso.
 - `.editorconfig`: Reglas: `root = true`; `[*.{yml,yaml}] indent_size=2`; `[*.go] indent_size=8, charset=utf-8`; `[*.sh] end_of_line=lf, indent_size=4`; `[*.j2] indent_size=2`. Asegura Go fmt compliance.
 
@@ -294,3 +294,79 @@ Después de Paso 6: `make test` passes all cases; push to GitHub triggers ci.yml
 - General: Todo fluye a tests para e2e; cyclical mitigado por build order.
 
 ¿Detalles de tu entorno dev (e.g., OS, si usas podman over docker) para tweaks?
+
+
+## 7. DECISIÓN ARQUITECTÓNICA: MULTI-HOMING (NOV 2025)
+
+### Contexto
+Arquitectura anterior: Full mesh iBGP con 5 border routers (bird1-5), cada uno peerando con los otros 4 via iBGP sobre TINC mesh. Total 22 containers (5 BIRD + 5 TINC + 5 daemons + 5 etcd + 2 monitoring).
+
+### Decisión
+Simplificar a **single border router (bird1) con ISP multi-homing**: Dual uplinks eBGP al mismo ISP mock, eliminando mesh iBGP interno.
+
+### Rationale
+1. **Scenario real**: Multi-homing a ISP es más común que full mesh interno de múltiples border routers
+2. **Simplicidad**: 8 containers (5 TINC VPN + 1 BIRD + 1 ISP + 1 etcd) vs 22
+3. **Focus**: Validar multi-homing BGP con local-pref, no complejidad de iBGP mesh
+4. **Recursos**: Menor footprint (4GB RAM vs 8GB+), deploy <1min vs 2min
+
+### Implementación
+- **TINC mesh**: 5 nodos (44.30.127.0/24) - solo VPN Layer 2, sin BGP entre ellos
+- **Border router (bird1)**:
+  - Primary uplink: 172.30.0.3 → 172.30.0.2 (ISP), local-pref 200
+  - Secondary uplink: 172.31.0.3 → 172.31.0.2 (ISP), local-pref 150
+  - Shared network namespace con tinc1 (network_mode: service:tinc1)
+- **ISP mock (isp-bird)**: 
+  - 2 BGP sessions (customer_primary, customer_secondary)
+  - Anuncia TEST-NET prefixes (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
+  - Filtra red TINC interna (44.30.127.0/24 rechazada)
+- **etcd**: Single node (no cluster) para TINC peer discovery
+- **Eliminado**: bird2-5, daemon1-5, etcd2-5, prometheus/grafana
+
+### Configuración BGP
+```jinja
+# configs/bird/protocols.conf.j2
+protocol bgp isp_primary {
+    local 172.30.0.3 as 65000;
+    neighbor 172.30.0.2 as 65001;
+    ipv4 {
+        import filter { bgp_local_pref = 200; accept; };  # Preferred
+        export filter export_to_isp;
+    };
+}
+
+protocol bgp isp_secondary {
+    local 172.31.0.3 as 65000;
+    neighbor 172.31.0.2 as 65001;
+    ipv4 {
+        import filter { bgp_local_pref = 150; accept; };  # Backup
+        export filter export_to_isp;
+    };
+}
+```
+
+### Validación
+Tests actualizados: `./tests/integration/test_isp_integrated.sh`
+- 8/8 tests passing
+- Verifica: 2 BGP sessions Established, local-pref correcto, filtros funcionando
+
+### Trade-offs
+- **Pro**: Simplicidad, menor recursos, scenario más realista
+- **Pro**: Fácil validar failover BGP (kill primary link)
+- **Con**: No valida iBGP mesh (puede agregarse después si necesario)
+- **Con**: Single point of failure (bird1) - aceptable para testing
+
+### Comandos
+```bash
+make deploy-local-isp                           # Deploy multi-homing
+docker exec bird1 birdc show protocols          # 2 Established
+docker exec bird1 birdc show route all 192.0.2.0/24  # Ver local-pref
+./tests/integration/test_isp_integrated.sh      # Run tests
+```
+
+---
+
+**Commit**: `refactor: restructure to single border router with ISP multi-homing` (hash: 14fe1e8)
+**Archivos modificados**: 7 (docker-compose.yml, protocols.conf.j2, isp-bird/bird.conf, filters.conf, tinc-up.j2, entrypoint.sh, test_isp_integrated.sh)
+**Líneas**: +150/-402
+
