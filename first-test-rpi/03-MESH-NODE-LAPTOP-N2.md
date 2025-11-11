@@ -1,184 +1,211 @@
-# Laptop n2 - Mesh Node Setup
+# Laptop n2 - Mesh Node Setup (Docker)
 
-Configure Laptop n2 as a TINC mesh node (no BGP).
+Configure Laptop n2 as a TINC mesh node (no BGP) using Docker containers.
 
 ## Device Info
 
 - **Role**: TINC mesh node
 - **IP**: `44.30.127.2/24` (TINC only)
-- **Software**: TINC only
+- **Docker Services**: `tinc2`, `etcd1`
 - **Purpose**: Participate in VPN mesh, be reachable from Mock-ISP
 
 ---
 
-## Step 1: Install TINC
-
-**⚠️ Repository does NOT handle this - manual installation required**
+## Step 1: Prerequisites
 
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+# Install Docker and Docker Compose
+sudo apt update
+sudo apt install -y docker.io docker-compose-v2
 
-# Install TINC
-sudo apt install -y tinc
+# Add user to docker group (optional)
+sudo usermod -aG docker $USER
+# Log out and back in
 
-# Verify
-tincd --version
+# Verify Docker
+docker --version
+docker compose version
 ```
 
 ---
 
-## Step 2: Configure TINC
-
-### 2.1 Setup Directories
+## Step 2: Clone Repository
 
 ```bash
-sudo mkdir -p /etc/tinc/bgpmesh/hosts
-```
-
-### 2.2 Generate Keys
-
-```bash
-sudo tincd -n bgpmesh -K4096
-# Creates:
-# - /etc/tinc/bgpmesh/rsa_key.priv
-# - /etc/tinc/bgpmesh/hosts/node2
-```
-
-### 2.3 Create TINC Config
-
-**Use repository template**: `configs/tinc/tinc.conf.j2`
-
-```bash
-sudo nano /etc/tinc/bgpmesh/tinc.conf
-```
-
-Add:
-```conf
-Name = node2
-Mode = switch
-Cipher = aes-256-cbc
-Digest = sha256
-Port = 655
-Interface = tinc0
-
-# Connect to node1 (border router)
-ConnectTo = node1
-```
-
-### 2.4 Create tinc-up Script
-
-**Use repository template**: `configs/tinc/tinc-up.j2`
-
-```bash
-sudo nano /etc/tinc/bgpmesh/tinc-up
-```
-
-Add:
-```bash
-#!/bin/sh
-ip link set $INTERFACE up mtu 1400
-ip addr add 44.30.127.2/24 dev $INTERFACE
-ip -6 addr add 2001:db8::2/64 dev $INTERFACE
-echo "TINC interface $INTERFACE configured: 44.30.127.2/24"
-```
-
-Make executable:
-```bash
-sudo chmod +x /etc/tinc/bgpmesh/tinc-up
-```
-
-### 2.5 Create tinc-down Script
-
-```bash
-sudo nano /etc/tinc/bgpmesh/tinc-down
-```
-
-Add:
-```bash
-#!/bin/sh
-ip link set $INTERFACE down
-```
-
-Make executable:
-```bash
-sudo chmod +x /etc/tinc/bgpmesh/tinc-down
-```
-
-### 2.6 Edit Host File
-
-```bash
-sudo nano /etc/tinc/bgpmesh/hosts/node2
-```
-
-Add at the top (before public key):
-```conf
-Address = <LAPTOP_N2_IP_OR_HOSTNAME>
-Port = 655
-Subnet = 44.30.127.2/32
+# Clone or copy repository to Laptop n2
+cd ~
+git clone <repository-url> BGP4mesh
+cd BGP4mesh
 ```
 
 ---
 
-## Step 3: Exchange TINC Host Files
+## Step 3: Create Minimal Docker Compose File
+
+Create a compose file for just TINC node2:
+
+```bash
+nano docker-compose.node2.yml
+```
+
+Add:
+```yaml
+version: '3.8'
+
+services:
+  tinc2:
+    build: ./docker/tinc
+    container_name: tinc2
+    hostname: tinc2
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "655:655/udp"
+    volumes:
+      - ./configs/tinc:/etc/tinc:ro
+      - tinc2-data:/var/run/tinc
+    depends_on:
+      - etcd1
+    networks:
+      - mesh-net
+      - cluster-net
+    environment:
+      - TINC_NAME=node2
+      - TINC_PORT=655
+      - TINC_NETNAME=bgpmesh
+    restart: unless-stopped
+
+  etcd1:
+    image: quay.io/coreos/etcd:v3.5.14
+    container_name: etcd1
+    hostname: etcd1
+    command:
+      - etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380
+      - --initial-cluster-state=new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - etcd1-data:/etcd-data
+    networks:
+      - cluster-net
+      - mesh-net
+    restart: unless-stopped
+
+networks:
+  mesh-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+  cluster-net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16
+
+volumes:
+  etcd1-data:
+  tinc2-data:
+```
+
+---
+
+## Step 4: Update TINC Config Template (Optional)
+
+The TINC config template should work as-is, but verify it includes `ConnectTo` for node1:
+
+```bash
+# Check template
+cat configs/tinc/tinc.conf.j2
+```
+
+If it doesn't have `ConnectTo = node1`, you may need to manually configure after deployment (see Step 7).
+
+---
+
+## Step 5: Deploy Services
+
+```bash
+# Deploy TINC node2
+docker compose -f docker-compose.node2.yml up -d --build
+
+# Check status
+docker ps
+# Should show: tinc2, etcd1 running
+```
+
+---
+
+## Step 6: Exchange TINC Host Files
 
 **Critical for connectivity!**
 
 ### Receive node1 host file from Laptop n1:
 
 ```bash
-sudo nano /etc/tinc/bgpmesh/hosts/node1
-# Paste the content that Laptop n1 provided
-# (From Laptop n1's: sudo cat /etc/tinc/bgpmesh/hosts/node1)
+# Create node1 host file
+docker exec tinc2 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node1' << 'EOF'
+# Paste content from Laptop n1 here
+# (From Laptop n1: docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1)
+EOF
 ```
 
 ### Send node2 host file to Laptop n1:
 
 ```bash
-# Display for copying
-sudo cat /etc/tinc/bgpmesh/hosts/node2
-# Copy entire output and send to Laptop n1
+# Display host file for Laptop n1
+docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
+# Copy this entire output and send to Laptop n1
 ```
 
 ### Verify both host files exist:
 
 ```bash
-ls -la /etc/tinc/bgpmesh/hosts/
+docker exec tinc2 ls -la /var/run/tinc/bgpmesh/hosts/
 # Should show: node1, node2
 ```
 
 ---
 
-## Step 4: Start TINC
+## Step 7: Configure TINC to Connect to node1
+
+If the template doesn't include `ConnectTo`, add it:
 
 ```bash
-# Enable service
-sudo systemctl enable tinc@bgpmesh
+# Check current config
+docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf
 
-# Start TINC
-sudo systemctl start tinc@bgpmesh
+# If ConnectTo is missing, restart with ConnectTo
+docker exec tinc2 sh -c 'echo "ConnectTo = node1" >> /var/run/tinc/bgpmesh/tinc.conf'
 
-# Check status
-sudo systemctl status tinc@bgpmesh
-
-# Verify interface
-ip addr show tinc0
-# Should show: 44.30.127.2/24 UP
+# Restart TINC
+docker compose -f docker-compose.node2.yml restart tinc2
 ```
 
 ---
 
-## Step 5: Verify Connectivity
+## Step 8: Verify Connectivity
 
 ### Check TINC Interface
 
 ```bash
 # Interface should be up
-ip addr show tinc0
+docker exec tinc2 ip addr show tinc0
 # Expected: 44.30.127.2/24 UP
 
 # Check logs
-sudo journalctl -u tinc@bgpmesh -n 30
+docker logs tinc2 | tail -30
 # Should show connection to node1
 ```
 
@@ -194,24 +221,21 @@ ping -c 5 44.30.127.1
 
 ```bash
 # View routes
-ip route
+docker exec tinc2 ip route
 # Should show: 44.30.127.0/24 dev tinc0 proto kernel
-
-# Laptop n2 should have default route or route to 172.30.0.0/24
-# This allows responses to Mock-ISP pings to work
 ```
 
 ---
 
-## Step 6: Make Laptop n2 Reachable from Mock-ISP
+## Step 9: Configure Return Route for Mock-ISP
 
-For Mock-ISP to successfully ping Laptop n2, ensure routing:
+For Mock-ISP to successfully ping Laptop n2, ensure routing back to ISP network:
 
 ### Option A: Add Default Route via Laptop n1
 
 ```bash
 # Add default route through TINC to Laptop n1
-sudo ip route add default via 44.30.127.1 dev tinc0 metric 100
+docker exec tinc2 ip route add default via 44.30.127.1 dev tinc0 metric 100
 
 # This allows responses to go back through Laptop n1 to Mock-ISP
 ```
@@ -220,18 +244,19 @@ sudo ip route add default via 44.30.127.1 dev tinc0 metric 100
 
 ```bash
 # Add route to ISP network via Laptop n1
-sudo ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
+docker exec tinc2 ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
 
 # This ensures responses to Mock-ISP go via Laptop n1
 ```
 
-### Make Route Persistent (Optional)
-
-Add to `/etc/network/interfaces` or create systemd service to add route on boot.
+**Note**: These routes are temporary. For persistence, you could:
+1. Add to a startup script
+2. Create a systemd service
+3. Use a Docker entrypoint script modification
 
 ---
 
-## Step 7: Test from Mock-ISP
+## Step 10: Test from Mock-ISP
 
 Once all devices are configured:
 
@@ -251,7 +276,7 @@ traceroute 44.30.127.2
 
 ```bash
 # Monitor ICMP
-sudo tcpdump -i tinc0 icmp
+docker exec tinc2 tcpdump -i tinc0 icmp
 # Should see echo requests from Mock-ISP and echo replies
 ```
 
@@ -262,27 +287,31 @@ sudo tcpdump -i tinc0 icmp
 ### TINC Not Starting
 
 ```bash
+# Check logs
+docker logs tinc2 | tail -50
+
 # Check config syntax
-sudo tincd -n bgpmesh -D -d5
-# Watch for errors
+docker exec tinc2 tincd -n bgpmesh -D -d5
+# Watch for errors (Ctrl+C to exit)
 
 # Check host files
-ls -la /etc/tinc/bgpmesh/hosts/
+docker exec tinc2 ls -la /var/run/tinc/bgpmesh/hosts/
 # Must have both node1 and node2
 
-# Check logs
-sudo journalctl -u tinc@bgpmesh -f
+# Check TUN device
+docker exec tinc2 ls -l /dev/net/tun
+# Should exist
 ```
 
 ### Ping from Laptop n1 Works, but Mock-ISP Ping Fails
 
 ```bash
 # Check routing on Laptop n2
-ip route
+docker exec tinc2 ip route
 # Must have route back to 172.30.0.0/24 via 44.30.127.1
 
-# Add route
-sudo ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
+# Add route if missing
+docker exec tinc2 ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
 
 # Test again from Mock-ISP
 ```
@@ -291,29 +320,47 @@ sudo ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
 
 ```bash
 # Check tinc-up permissions
-ls -l /etc/tinc/bgpmesh/tinc-up
-# Should be executable (chmod +x)
+docker exec tinc2 ls -l /var/run/tinc/bgpmesh/tinc-up
+# Should be executable
 
-# Check TUN device
-ls -l /dev/net/tun
-# Should exist
+# Check tinc-up content
+docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc-up
+# Should configure 44.30.127.2/24
 
 # Restart TINC
-sudo systemctl restart tinc@bgpmesh
+docker compose -f docker-compose.node2.yml restart tinc2
 ```
 
 ### No Connection to node1
 
 ```bash
 # Check node1 host file exists and has Address line
-cat /etc/tinc/bgpmesh/hosts/node1
+docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node1
 # Must have: Address = <laptop_n1_ip>
 
+# Check tinc.conf has ConnectTo
+docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
+# Should show: ConnectTo = node1
+
 # Manual connection attempt
-sudo tinc -n bgpmesh connect node1
+docker exec tinc2 tinc -n bgpmesh connect node1
 
 # Check network connectivity to Laptop n1
 # (if on same physical network, should be reachable)
+```
+
+### etcd Connection Issues
+
+```bash
+# Check etcd is running
+docker ps | grep etcd1
+
+# Check etcd logs
+docker logs etcd1
+
+# Verify etcd connectivity from tinc2
+docker exec tinc2 etcdctl --endpoints=http://etcd1:2379 endpoint health
+# Should show healthy
 ```
 
 ---
@@ -321,17 +368,17 @@ sudo tinc -n bgpmesh connect node1
 ## Configuration Files Used
 
 From repository:
-- **TINC config**: `configs/tinc/tinc.conf.j2`
-- **TINC up**: `configs/tinc/tinc-up.j2`
-- **TINC down**: `configs/tinc/tinc-down.j2`
-- **Setup reference**: `docker/tinc/entrypoint.sh`
+- **Docker Compose**: `docker-compose.node2.yml` (created)
+- **TINC templates**: `configs/tinc/tinc.conf.j2`, `configs/tinc/tinc-up.j2`, `configs/tinc/tinc-down.j2`
+- **Docker image**: `docker/tinc/Dockerfile`
+- **Entrypoint**: `docker/tinc/entrypoint.sh`
 
 ---
 
 ## Verification Checklist
 
-- [ ] TINC service running
-- [ ] tinc0 interface UP with `44.30.127.2/24`
+- [ ] TINC service running (`docker ps | grep tinc2`)
+- [ ] tinc0 interface UP with `44.30.127.2/24` (`docker exec tinc2 ip addr show tinc0`)
 - [ ] Can ping Laptop n1 (`44.30.127.1`)
 - [ ] Route to ISP network exists (via `44.30.127.1`)
 - [ ] **Mock-ISP can ping this device** ✅
@@ -350,4 +397,3 @@ This proves:
 - BGP routing works (RPi → Laptop n1)
 - TINC mesh works (Laptop n1 → Laptop n2)
 - Full end-to-end connectivity established
-
