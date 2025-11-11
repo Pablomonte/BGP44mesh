@@ -1,34 +1,29 @@
 # BGP Overlay Network over TINC Mesh
 
-A production-grade BGP routing framework with automated orchestration, combining BIRD 3.x, TINC 1.0 mesh VPN, etcd distributed storage, and custom Go daemon for peer discovery.
+A production-grade BGP routing framework with ISP multi-homing, combining BIRD 2.x, TINC 1.0 mesh VPN, and etcd distributed storage.
 
 ## Stack
 
-- **BIRD 3.x**: BGP routing daemon (MP-BGP, RPKI validation)
+- **BIRD 2.x**: BGP routing daemon with multi-homing support
 - **TINC 1.0**: Layer 2 mesh VPN (switch mode, RSA-2048, AES-256)
-- **etcd 3.5+**: Distributed config/state storage with HA
-- **Ansible**: Infrastructure orchestration
-- **Go daemon**: Custom propagation (mDNS discovery, key distribution, config sync)
-- **Prometheus + Grafana**: Metrics and monitoring
-- **Docker**: Service containerization
+- **etcd 3.5+**: Distributed storage for TINC peer discovery
+- **Ansible**: Infrastructure orchestration (production deployment)
+- **Docker**: Service containerization (8 containers)
 
 ## Quick Start
 
 ```bash
 # Setup
 cp .env.example .env
-make deploy-local
+make deploy-local-isp  # Deploys 8 containers with ISP multi-homing
 
-# Verify (wait ~90s for convergence)
-docker exec bird1 birdc show protocols
-docker exec tinc1 tinc -n bgpmesh info
-docker exec etcd1 etcdctl endpoint health
-
-# Monitor
-make monitor  # Opens Grafana at http://localhost:3000
+# Verify BGP multi-homing (2 uplinks to ISP)
+docker exec bird1 birdc show protocols        # Should show 2 Established
+docker exec isp-bird birdc show protocols     # Should show 2 Established
+docker exec bird1 birdc show route all 192.0.2.0/24  # Check local-pref
 
 # Test
-make test-all
+./tests/integration/test_isp_integrated.sh    # 8/8 tests
 
 # Cleanup
 make clean
@@ -54,118 +49,108 @@ See [docs/EXTERNAL-ISP-INTEGRATION.md](docs/EXTERNAL-ISP-INTEGRATION.md) for com
 
 ```bash
 # Container status
-make status
-docker ps
+docker ps  # 8 containers: 5 TINC + 1 BIRD + 1 ISP + 1 etcd
 
-# BIRD (BGP routing)
-docker exec bird1 birdc show protocols        # All protocols
-docker exec bird1 birdc show protocols all peer1  # Peer detail
-docker exec bird1 birdc show route            # Routing table
+# BIRD (BGP routing - multi-homing)
+docker exec bird1 birdc show protocols              # 2 ISP uplinks (Established)
+docker exec bird1 birdc show protocols all isp_primary   # Primary link detail
+docker exec bird1 birdc show route all 192.0.2.0/24 # Check local-pref (200 vs 150)
 
-# TINC (VPN mesh)
-docker exec tinc1 ip addr show tinc0          # Interface status
+# ISP mock
+docker exec isp-bird birdc show protocols           # 2 customer sessions
+docker exec isp-bird birdc show route               # ISP routes (no 44.30.127.0/24)
 
-# etcd (distributed storage)
-docker exec etcd1 etcdctl member list         # Cluster members
-docker exec etcd1 etcdctl endpoint health     # Cluster health
-docker exec etcd1 etcdctl put /key "value"    # Write
-docker exec etcd1 etcdctl get /key            # Read
+# TINC (VPN mesh - 5 nodes)
+docker exec tinc1 ip addr show tinc0                # 44.30.127.1/24
+docker exec tinc2 ping -c 3 44.30.127.1             # Mesh connectivity
+
+# etcd (single node)
+docker exec etcd1 etcdctl get /peers --prefix       # TINC peer info
 
 # Logs
-docker logs -f bird1                          # Follow logs
-docker compose logs bird1 bird2 bird3         # Multiple services
-
-# Access containers
-docker exec -it bird1 /bin/bash               # Interactive shell
+docker logs -f bird1                                # Border router logs
+docker logs -f isp-bird                             # ISP mock logs
 ```
 
 ## Project Structure
 
 ```
 BGP/
-├── docker-compose.yml          # 15 services (5 bird + 5 tinc + 5 etcd + monitoring)
+├── docker-compose.yml          # 8 services (5 TINC + 1 BIRD + 1 ISP + 1 etcd)
 ├── Makefile                    # Build/deploy automation
-├── configs/                    # BIRD/TINC templates (Jinja2)
+├── configs/
+│   ├── bird/                   # BIRD border router (multi-homing)
+│   ├── isp-bird/               # ISP mock (dual BGP sessions)
+│   └── tinc/                   # TINC mesh templates
 ├── docker/                     # Container builds
-├── ansible/                    # Infrastructure orchestration (4 roles)
-├── daemon-go/                  # Custom Go propagation daemon
-├── tests/                      # Validation, integration, E2E tests
+├── tests/integration/          # Multi-homing integration tests
 └── docs/                       # Documentation
 
 ## Architecture
 
-- **Layer 2**: TINC mesh (switch mode) with UDP hole punching
-- **Layer 3**: BIRD BGP sessions over TINC tunnels
-- **State**: etcd cluster for peer propagation
-- **Discovery**: Go daemon with mDNS over TINC interface
-- **Monitoring**: Prometheus scraping BIRD metrics, Grafana dashboards
+- **TINC mesh**: 5 nodes (44.30.127.0/24) - Layer 2 VPN only
+- **Border router**: bird1 with dual ISP uplinks (eBGP multi-homing)
+  - Primary: 172.30.0.3 → 172.30.0.2 (local-pref 200)
+  - Secondary: 172.31.0.3 → 172.31.0.2 (local-pref 150)
+- **ISP mock**: Dual BGP sessions, announces TEST-NET prefixes
+- **State**: Single etcd node for TINC peer discovery
 
 See [docs/architecture/decisions.md](docs/architecture/decisions.md) for design decisions.
 
 ## Development
 
 ```bash
-# Run all tests
-make test-all
-
-# Test individual components
-make test-env          # Environment variables
-make test-configs      # Configuration templates
-make test-builds       # Docker builds
-make test-integration  # BGP/TINC/etcd integration
-make test-e2e          # Full stack workflow
+# Run integration tests
+./tests/integration/test_isp_integrated.sh  # Multi-homing validation
 
 # Development workflow
-vim configs/bird/bird.conf.j2
-make validate
-docker restart bird1 bird2 bird3
+vim configs/bird/protocols.conf.j2  # Modify BGP configuration
+docker restart bird1                 # Apply changes
+docker exec bird1 birdc show protocols  # Verify
 ```
 
 ## Requirements
 
 - Docker 24+ with Compose v2
-- Go 1.21+ (for daemon development)
-- Ansible 2.16+ (for production deployment)
-- >8GB RAM (>16GB recommended for parallel builds)
+- Go 1.21+ (for daemon development - optional)
+- Ansible 2.16+ (for production deployment - optional)
+- >4GB RAM
 
-## Performance Targets
+## Performance
 
-- Deployment: <2min convergence
-- BGP: <30s reconvergence with BFD
-- etcd: <10ms quorum reads
-- TINC: <50ms overhead vs direct
+- Deployment: <1min convergence (8 containers)
+- BGP: Dual uplink with automatic failover (local-pref based)
+- TINC: 5-node mesh with <50ms overhead
 
 ## Sprint Status
 
-### Sprint 2 Phase 1 (Completed 2025-10-28)
+### Current: Multi-homing Refactor (2025-11-10)
 
-- **Testing**: Makefile (20+ targets), CI coverage enforcement
-  - pkg/tinc: 92.7% coverage (11 test functions)
-  - pkg/discovery: 89.8% coverage (9 test functions)
-  - pkg/types: 100% coverage
-- **Scaling**: 5-node Docker deployment (15 containers, etcd quorum)
-- **Automation**: 4 Ansible roles (etcd, tinc, bird, bgp-daemon)
-- **Docs**: Testing guide, Deployment guide, Status report
+**Architecture change**: Full mesh iBGP (5 routers) → Single border router with ISP multi-homing
 
-**Commands**:
+- **Simplification**: 22 containers → 8 containers
+- **Multi-homing**: Dual ISP uplinks with BGP local-pref (200 primary, 150 backup)
+- **Networks**:
+  - TINC mesh: 44.30.127.0/24 (5 VPN nodes)
+  - ISP primary: 172.30.0.0/24
+  - ISP secondary: 172.31.0.0/24
+- **Testing**: 8/8 integration tests passing
+
+**Deploy**:
 ```bash
-cd daemon-go && make test-coverage  # Run tests with coverage
-cd daemon-go && make test-unit      # Fast tests (skip integration)
-make deploy-local                    # Docker 5-node
-cd ansible && ansible-playbook -i inventory/hosts.ini playbook.yml  # Ansible
+make deploy-local-isp                        # 8 containers with multi-homing
+./tests/integration/test_isp_integrated.sh   # Verify
 ```
 
-**Next**: Sprint 2 Phase 2 (custom Grafana dashboards, additional integration tests)
+### Previous Sprints
 
-### Sprint 1 (Completed)
-
-Local 3-node MVP, Docker orchestration, basic tests, Grafana monitoring
+- **Sprint 2 Phase 1**: Go daemon testing (92%+ coverage), 5-node scaling, Ansible roles
+- **Sprint 1**: 3-node MVP, Docker orchestration, monitoring
 
 ### Roadmap
 
-- **Sprint 2 Phase 2**: Unit tests completion, custom Grafana dashboards
-- **Sprint 3**: Production hardening (rolling updates, chaos testing)
-- **Sprint 4**: Scalability (route reflectors, RPKI, multi-region)
+- **Next**: Production hardening, route reflectors
+- **Future**: RPKI validation, multi-region support
 
 ## License
 
