@@ -1,313 +1,269 @@
-# Laptop n1 - Border Router Setup
+# Laptop n1 - Border Router Setup (Docker)
 
-Configure Laptop n1 as border router with BIRD (BGP) + TINC (VPN mesh).
+Configure Laptop n1 as border router with BIRD (BGP) + TINC (VPN mesh) using Docker containers.
 
 ## Device Info
 
 - **Role**: Border Router (AS 65000)
 - **IPs**: 
-  - ISP-facing: `172.30.0.100/24`
-  - TINC mesh: `44.30.127.1/24`
-- **Software**: BIRD + TINC
+  - ISP-facing: `172.30.0.100/24` (via macvlan)
+  - TINC mesh: `44.30.127.1/24` (via TINC container)
+- **Docker Services**: `bird1`, `tinc1`, `etcd1`
 - **Purpose**: Connect ISP to TINC mesh, route traffic between them
 
 ---
 
-## Step 1: Install Software
-
-**⚠️ Repository does NOT handle this - manual installation required**
+## Step 1: Prerequisites
 
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+# Install Docker and Docker Compose
+sudo apt update
+sudo apt install -y docker.io docker-compose-v2
 
-# Install BIRD 2.x and TINC
-sudo apt install -y bird2 tinc python3-jinja2
+# Add user to docker group (optional)
+sudo usermod -aG docker $USER
+# Log out and back in
 
-# Verify
-bird --version
-tincd --version
+# Verify Docker
+docker --version
+docker compose version
+
+# Verify macvlan support (required)
+lsmod | grep macvlan
+# Should show macvlan module loaded
 ```
 
 ---
 
-## Step 2: Configure ISP-Facing Network Interface
-
-Set static IP `172.30.0.100/24`:
+## Step 2: Clone Repository
 
 ```bash
-sudo nano /etc/systemd/network/20-eth0.network
-```
-
-Add:
-```ini
-[Match]
-Name=eth0
-
-[Network]
-Address=172.30.0.100/24
-Gateway=172.30.0.1
-```
-
-Apply:
-```bash
-sudo systemctl restart systemd-networkd
-ip addr show eth0
-# Verify: 172.30.0.100/24
-
-# Test ISP connectivity
-ping -c 3 172.30.0.1
-# Should succeed
+# Clone or copy repository to Laptop n1
+cd ~
+git clone <repository-url> BGP4mesh
+cd BGP4mesh
 ```
 
 ---
 
-## Step 3: Configure TINC VPN
+## Step 3: Identify Network Interface
 
-### 3.1 Setup Directories
-
-```bash
-sudo mkdir -p /etc/tinc/bgpmesh/hosts
-```
-
-### 3.2 Generate Keys
+Find the physical interface connected to the ISP network:
 
 ```bash
-sudo tincd -n bgpmesh -K4096
-# Creates:
-# - /etc/tinc/bgpmesh/rsa_key.priv
-# - /etc/tinc/bgpmesh/hosts/node1
+# Find default route interface
+ip route | grep default
+# Example output: default via 172.30.0.1 dev eth0 ...
+
+# Or list all interfaces
+ip addr show
+# Look for interface with IP in 172.30.0.0/24 range
 ```
 
-### 3.3 Create TINC Config
+**Note the interface name** (e.g., `eth0`, `enp0s3`, `enxa0cec8992ed8`). You'll need this for macvlan configuration.
 
-**Use repository template**: `configs/tinc/tinc.conf.j2`
+---
+
+## Step 4: Create Environment File
+
+Create `.env` file for Docker Compose:
 
 ```bash
-# Create config (manually render Jinja2 template)
-sudo nano /etc/tinc/bgpmesh/tinc.conf
-```
-
-Add (from template):
-```conf
-Name = node1
-Mode = switch
-Cipher = aes-256-cbc
-Digest = sha256
-Port = 655
-Interface = tinc0
-```
-
-### 3.4 Create tinc-up Script
-
-**Use repository template**: `configs/tinc/tinc-up.j2`
-
-```bash
-sudo nano /etc/tinc/bgpmesh/tinc-up
-```
-
-Add (adapted from template):
-```bash
-#!/bin/sh
-ip link set $INTERFACE up mtu 1400
-ip addr add 44.30.127.1/24 dev $INTERFACE
-ip -6 addr add 2001:db8::1/64 dev $INTERFACE
-echo "TINC interface $INTERFACE configured: 44.30.127.1/24"
-```
-
-Make executable:
-```bash
-sudo chmod +x /etc/tinc/bgpmesh/tinc-up
-```
-
-### 3.5 Create tinc-down Script
-
-```bash
-sudo nano /etc/tinc/bgpmesh/tinc-down
+cd ~/BGP4mesh
+nano .env
 ```
 
 Add:
 ```bash
-#!/bin/sh
-ip link set $INTERFACE down
+# BGP Configuration
+BGP_AS=65000
+ISP_ENABLED=true
+ISP_NEIGHBOR=172.30.0.1
+ISP_LOCAL_IP=172.30.0.100
+
+# Macvlan Configuration (for ISP connectivity)
+LAN_INTERFACE=eth0  # ← Change to your interface name
+LAN_SUBNET=172.30.0.0/24
+LAN_GATEWAY=172.30.0.1
+LAN_IP_RANGE=172.30.0.100/31
+TINC1_LAN_IP=172.30.0.100
+
+# TINC Configuration
+TINC_PORT=655
+TINC_NETNAME=bgpmesh
 ```
 
-Make executable:
+**Important**: Replace `eth0` with your actual interface name from Step 3.
+
+---
+
+## Step 5: Create Docker Compose Override for Hardware Test
+
+Create a compose override file for the hardware test:
+
 ```bash
-sudo chmod +x /etc/tinc/bgpmesh/tinc-down
+nano docker-compose.hardware-test.yml
 ```
 
-### 3.6 Edit Host File
+Add:
+```yaml
+# Docker Compose Override for Hardware Test
+# Provides macvlan network for ISP connectivity
 
-```bash
-sudo nano /etc/tinc/bgpmesh/hosts/node1
-```
+version: '3.8'
 
-Add at the top (before public key):
-```conf
-Address = <LAPTOP_N1_IP_OR_HOSTNAME>
-Port = 655
-Subnet = 44.30.127.1/32
-```
+services:
+  tinc1:
+    networks:
+      mesh-net:
+      cluster-net:
+      isp-net:
+        ipv4_address: 172.30.0.3
+      lan-macvlan:
+        ipv4_address: ${TINC1_LAN_IP:-172.30.0.100}
+    extra_hosts:
+      - "isp-bird:${ISP_NEIGHBOR:-172.30.0.1}"
 
-### 3.7 Save Host File for Exchange
+  bird1:
+    environment:
+      - ISP_ENABLED=true
+      - ISP_NEIGHBOR=${ISP_NEIGHBOR:-172.30.0.1}
+      - ISP_LOCAL_IP=${ISP_LOCAL_IP:-172.30.0.100}
 
-```bash
-# Display for copying to Laptop n2
-sudo cat /etc/tinc/bgpmesh/hosts/node1
-# Copy this entire content - you'll need it for Laptop n2
+networks:
+  lan-macvlan:
+    driver: macvlan
+    driver_opts:
+      parent: ${LAN_INTERFACE:-eth0}
+      macvlan_mode: bridge
+    ipam:
+      config:
+        - subnet: ${LAN_SUBNET:-172.30.0.0/24}
+          gateway: ${LAN_GATEWAY:-172.30.0.1}
+          ip_range: ${LAN_IP_RANGE:-172.30.0.100/31}
 ```
 
 ---
 
-## Step 4: Configure BIRD
+## Step 6: Update BIRD Export Filter
 
-### 4.1 Main Config
-
-**Reference**: `configs/bird/bird.conf.j2`
+The repository's filter needs to export TINC mesh subnet to ISP:
 
 ```bash
-sudo mkdir -p /etc/bird
-sudo nano /etc/bird/bird.conf
+# Edit filters config
+nano configs/bird/filters.conf
 ```
 
-Add:
+**Update the `export_to_isp` filter** (lines 14-32):
+
+Change:
 ```conf
-router id 192.0.2.1;
-log syslog all;
-debug protocols all;
-
-protocol device { scan time 10; }
-
-protocol kernel {
-    ipv4 {
-        import all;
-        export all;
-    };
-}
-
-protocol static { ipv4; }
-
-include "/etc/bird/filters.conf";
-include "/etc/bird/protocols.conf";
-```
-
-### 4.2 Filters Config
-
-**Reference**: `configs/bird/filters.conf`
-
-```bash
-sudo nano /etc/bird/filters.conf
-```
-
-Add:
-```conf
-# Export to ISP: Announce TINC mesh subnet
 filter export_to_isp {
-    # CRITICAL: Export TINC mesh so ISP can route to it
+    # Accept customer prefixes
+    if net ~ [10.100.0.0/24, 10.200.0.0/24] then {
+        print "Announcing customer prefix ", net, " to ISP";
+        accept;
+    }
+
+    # Reject TINC mesh internal network
+    if net ~ [44.30.127.0/24] then {
+        print "Blocking internal mesh route ", net, " from ISP";
+        reject;
+    }
+
+    # Reject everything else
+    print "Rejecting unknown prefix ", net, " to ISP";
+    reject;
+}
+```
+
+To:
+```conf
+filter export_to_isp {
+    # CRITICAL: Export TINC mesh subnet so ISP can route to it
     if net ~ [44.30.127.0/24] then {
         print "Announcing TINC mesh ", net, " to ISP";
         accept;
     }
-    
-    # Optionally announce customer prefixes
-    if net ~ [10.100.0.0/24, 10.200.0.0/24] then accept;
-    
+
+    # Accept customer prefixes
+    if net ~ [10.100.0.0/24, 10.200.0.0/24] then {
+        print "Announcing customer prefix ", net, " to ISP";
+        accept;
+    }
+
+    # Reject everything else
+    print "Rejecting unknown prefix ", net, " to ISP";
     reject;
 }
-
-# Import from ISP
-filter import_from_isp {
-    bgp_local_pref = 200;
-    accept;
-}
-```
-
-### 4.3 Protocols Config
-
-**Reference**: `configs/bird/protocols.conf.j2`
-
-```bash
-sudo nano /etc/bird/protocols.conf
-```
-
-Add:
-```conf
-# BGP to ISP (eBGP)
-protocol bgp isp {
-    description "ISP Upstream AS 65001";
-    local 172.30.0.100 as 65000;
-    neighbor 172.30.0.1 as 65001;
-    
-    ipv4 {
-        import filter import_from_isp;
-        export filter export_to_isp;
-    };
-    
-    hold time 90;
-    keepalive time 30;
-}
 ```
 
 ---
 
-## Step 5: Start Services
-
-### Start TINC
+## Step 7: Deploy Services
 
 ```bash
-sudo systemctl enable tinc@bgpmesh
-sudo systemctl start tinc@bgpmesh
+# Deploy with hardware test override
+docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml up -d --build
 
-# Verify
-sudo systemctl status tinc@bgpmesh
-ip addr show tinc0
-# Should show: 44.30.127.1/24
-```
-
-### Start BIRD
-
-```bash
-sudo systemctl enable bird
-sudo systemctl start bird
-
-# Verify
-sudo systemctl status bird
-sudo birdc show status
+# Check status
+docker ps
+# Should show: bird1, tinc1, etcd1 running
 ```
 
 ---
 
-## Step 6: Verify Configuration
+## Step 8: Verify Configuration
 
 ### Check TINC
 
 ```bash
-# Interface up
-ip addr show tinc0
+# Check container is running
+docker ps | grep tinc1
+
+# Check TINC interface
+docker exec tinc1 ip addr show tinc0
 # Should show: 44.30.127.1/24 UP
 
-# Logs
-sudo journalctl -u tinc@bgpmesh -n 20
+# Check logs
+docker logs tinc1 | tail -20
 ```
 
 ### Check BIRD
 
 ```bash
-# Protocols
-sudo birdc show protocols
-# Should show: isp BGP up/Established
+# Check container is running
+docker ps | grep bird1
 
-# BGP session details
-sudo birdc show protocols all isp
+# Check BIRD status
+docker exec bird1 birdc show status
+
+# Check protocols
+docker exec bird1 birdc show protocols
+# Should show: isp_primary BGP up/Established (after ISP is running)
+
+# Check BGP session details
+docker exec bird1 birdc show protocols all isp_primary
 
 # Routes from ISP
-sudo birdc show route protocol isp
+docker exec bird1 birdc show route protocol isp_primary
 # Should show: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
 
 # Routes exported to ISP
-sudo birdc show route export isp
+docker exec bird1 birdc show route export isp_primary
 # Should include: 44.30.127.0/24 ← CRITICAL
+```
+
+### Check Macvlan Network
+
+```bash
+# Check macvlan interface exists
+ip addr show | grep 172.30.0.100
+# Should show macvlan interface with 172.30.0.100/24
+
+# Test connectivity to ISP
+ping -c 3 172.30.0.1
+# Should succeed
 ```
 
 ### Check Kernel Routes
@@ -320,30 +276,35 @@ ip route | grep 44.30.127
 
 ---
 
-## Step 7: Exchange TINC Host Files
+## Step 9: Exchange TINC Host Files with Laptop n2
 
 **Critical for TINC connectivity!**
 
-### Send to Laptop n2:
+### Get node1 host file:
+
 ```bash
-# Already saved in Step 3.7
-sudo cat /etc/tinc/bgpmesh/hosts/node1
-# Copy this to Laptop n2
+# Display host file for Laptop n2
+docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1
+# Copy this entire output
 ```
 
-### Receive from Laptop n2:
-Once Laptop n2 sends its host file:
-```bash
-sudo nano /etc/tinc/bgpmesh/hosts/node2
-# Paste content from Laptop n2
+### Receive node2 host file from Laptop n2:
 
-# Restart TINC
-sudo systemctl restart tinc@bgpmesh
+Once Laptop n2 provides its host file:
+
+```bash
+# Create node2 host file
+docker exec tinc1 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node2' << 'EOF'
+# Paste content from Laptop n2 here
+EOF
+
+# Restart TINC to establish connection
+docker compose restart tinc1
 ```
 
 ---
 
-## Step 8: Verify After Laptop n2 is Configured
+## Step 10: Verify After Laptop n2 is Configured
 
 ```bash
 # Ping Laptop n2 via TINC
@@ -351,11 +312,11 @@ ping -c 5 44.30.127.2
 # Should succeed
 
 # Check TINC connection
-sudo tinc -n bgpmesh dump nodes
+docker exec tinc1 tinc -n bgpmesh dump nodes
 # Should show node2
 
 # Verify BIRD sees kernel route to Laptop n2
-sudo birdc show route
+docker exec bird1 birdc show route
 # Should include routes via tinc0
 ```
 
@@ -366,18 +327,37 @@ sudo birdc show route
 ### BGP Not Establishing
 
 ```bash
-ping -c 3 172.30.0.1  # Test ISP connectivity
-sudo journalctl -u bird -n 50  # Check logs
-sudo birdc show protocols all isp  # Detailed BGP info
-sudo systemctl restart bird  # Restart
+# Test ISP connectivity
+ping -c 3 172.30.0.1
+
+# Check BIRD logs
+docker logs bird1 | tail -50
+
+# Check BGP session details
+docker exec bird1 birdc show protocols all isp_primary
+
+# Verify macvlan IP is correct
+ip addr show | grep 172.30.0.100
+
+# Restart services
+docker compose restart bird1
 ```
 
 ### TINC Not Connecting
 
 ```bash
-sudo journalctl -u tinc@bgpmesh -n 50  # Check logs
-ls -la /etc/tinc/bgpmesh/hosts/  # Verify node2 file exists
-sudo systemctl restart tinc@bgpmesh  # Restart
+# Check logs
+docker logs tinc1 | tail -50
+
+# Verify node2 host file exists
+docker exec tinc1 ls -la /var/run/tinc/bgpmesh/hosts/
+# Should show: node1, node2
+
+# Check TINC interface
+docker exec tinc1 ip addr show tinc0
+
+# Restart TINC
+docker compose restart tinc1
 ```
 
 ### 44.30.127.0/24 Not Announced to ISP
@@ -387,11 +367,31 @@ sudo systemctl restart tinc@bgpmesh  # Restart
 ip route | grep 44.30.127
 
 # Check BIRD export filter
-sudo birdc show route export isp | grep 44.30.127
+docker exec bird1 birdc show route export isp_primary | grep 44.30.127
 
-# Verify filter accepts it
-sudo nano /etc/bird/filters.conf
-# Ensure: if net ~ [44.30.127.0/24] then accept;
+# Verify filter configuration
+cat configs/bird/filters.conf | grep -A 5 "export_to_isp"
+# Should show: if net ~ [44.30.127.0/24] then accept;
+
+# Reload BIRD config
+docker exec bird1 birdc configure
+```
+
+### Macvlan Not Working
+
+```bash
+# Check interface exists
+ip link show | grep macvlan
+
+# Check parent interface is correct
+docker network inspect bgp4mesh-fork-santi_lan-macvlan | grep parent
+
+# Verify IP assignment
+ip addr show | grep 172.30.0.100
+
+# If macvlan not created, recreate network
+docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml down
+docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml up -d
 ```
 
 ---
@@ -399,17 +399,14 @@ sudo nano /etc/bird/filters.conf
 ## Configuration Files Used
 
 From repository:
-- **BIRD main**: `configs/bird/bird.conf.j2`
-- **BIRD filters**: `configs/bird/filters.conf`
-- **BIRD protocols**: `configs/bird/protocols.conf.j2`
-- **TINC config**: `configs/tinc/tinc.conf.j2`
-- **TINC up**: `configs/tinc/tinc-up.j2`
-- **TINC down**: `configs/tinc/tinc-down.j2`
-- **Setup reference**: `docker/bird/entrypoint.sh`, `docker/tinc/entrypoint.sh`
+- **Docker Compose**: `docker-compose.yml`, `docker-compose.hardware-test.yml` (created)
+- **Environment**: `.env` (created)
+- **BIRD configs**: `configs/bird/bird.conf.j2`, `configs/bird/protocols.conf.j2`, `configs/bird/filters.conf` (modified)
+- **TINC templates**: `configs/tinc/*.j2`
+- **Docker images**: `docker/bird/`, `docker/tinc/`
 
 ---
 
 ## Next Step
 
 Configure **Laptop n2** → See `03-MESH-NODE-LAPTOP-N2.md`
-

@@ -1,64 +1,71 @@
 # First Hardware Test - Mock ISP Ping via BGP + TINC
 
 ## Goal
-Configure 3 physical devices so **Mock-ISP (Raspberry Pi) can ping Laptop n2** through BGP routing and TINC VPN.
+Configure 3 physical devices so **Mock-ISP (Raspberry Pi) can ping Laptop n2** through BGP routing and TINC VPN using **Docker containers**.
 
 ## Quick Start
 
 Follow these documents **in order**:
 
 1. **[00-OVERVIEW.md](./00-OVERVIEW.md)** - Architecture and prerequisites (~5 min read)
-2. **[01-MOCK-ISP-RPI.md](./01-MOCK-ISP-RPI.md)** - Raspberry Pi setup (~20 min)
-3. **[02-BORDER-ROUTER-LAPTOP-N1.md](./02-BORDER-ROUTER-LAPTOP-N1.md)** - Laptop n1 setup (~30 min)
-4. **[03-MESH-NODE-LAPTOP-N2.md](./03-MESH-NODE-LAPTOP-N2.md)** - Laptop n2 setup (~15 min)
+2. **[01-MOCK-ISP-RPI.md](./01-MOCK-ISP-RPI.md)** - Raspberry Pi Docker setup (~15 min)
+3. **[02-BORDER-ROUTER-LAPTOP-N1.md](./02-BORDER-ROUTER-LAPTOP-N1.md)** - Laptop n1 Docker setup (~20 min)
+4. **[03-MESH-NODE-LAPTOP-N2.md](./03-MESH-NODE-LAPTOP-N2.md)** - Laptop n2 Docker setup (~15 min)
 
-**Total time**: ~75 minutes
+**Total time**: ~55 minutes
 
 ## Architecture
 
 ```
-Raspberry Pi          Laptop n1              Laptop n2
-172.30.0.1       ←BGP→ 172.30.0.100   ←TINC→ 44.30.127.2
-AS 65001, BIRD        + 44.30.127.1          TINC only
-                      AS 65000
-                      BIRD + TINC
+Raspberry Pi (Docker)          Laptop n1 (Docker)              Laptop n2 (Docker)
+isp-bird container          bird1 + tinc1 containers          tinc2 container
+172.30.0.1/24              172.30.0.100/24 + 44.30.127.1/24    44.30.127.2/24
+AS 65001, BIRD             AS 65000, BIRD + TINC               TINC only
+     │                          │                                  │
+     │◄─────── BGP eBGP ────────►│◄──── TINC VPN Mesh ────────────►│
+     │                          │                                  │
 ```
 
 ## Device Configuration Summary
 
-| Device | Software | IPs | Config Files |
-|--------|----------|-----|--------------|
-| Raspberry Pi | BIRD | 172.30.0.1 | 01-MOCK-ISP-RPI.md |
-| Laptop n1 | BIRD + TINC | 172.30.0.100 + 44.30.127.1 | 02-BORDER-ROUTER-LAPTOP-N1.md |
-| Laptop n2 | TINC | 44.30.127.2 | 03-MESH-NODE-LAPTOP-N2.md |
+| Device | Docker Services | IPs | Network Setup |
+|--------|----------------|-----|---------------|
+| Raspberry Pi | `isp-bird` | 172.30.0.1/24 | Host network mode |
+| Laptop n1 | `bird1` + `tinc1` + `etcd1` | 172.30.0.100/24 (macvlan) + 44.30.127.1/24 (TINC) | Macvlan + Docker networks |
+| Laptop n2 | `tinc2` + `etcd1` | 44.30.127.2/24 (TINC) | Docker networks |
 
 ## Success Test
 
 After completing all setup:
 
 ```bash
-# On Raspberry Pi
+# On Raspberry Pi (from host or inside isp-bird container)
 ping -c 5 44.30.127.2
 # Should succeed ✅
 ```
 
 ## Repository Info
 
-**⚠️ Important**: This repository is Docker-focused. The Makefile commands are for Docker only.
+**✅ This repository uses Docker for all services**. All BIRD and TINC services run in containers.
 
-**What we use**:
-- Configuration files from `configs/isp-bird/`, `configs/bird/`, `configs/tinc/`
-- Setup logic from `docker/*/entrypoint.sh` (as reference)
+**What the repository provides**:
+- Docker Compose files for orchestration
+- Docker images for BIRD and TINC
+- Configuration templates in `configs/`
+- Entrypoint scripts that render configurations
+- Network setup via Docker networks and macvlan
 
-**What we install manually**:
-- BIRD and TINC packages (not provided by repository)
+**Prerequisites**:
+- Docker 24+ and Docker Compose v2
+- Linux kernel with macvlan support (for Laptop n1)
+- Physical network connectivity between devices
 
 ## Files
 
-- `00-OVERVIEW.md` (3.8 KB) - General info, architecture, how ping works
-- `01-MOCK-ISP-RPI.md` (4.5 KB) - Raspberry Pi setup with BIRD
-- `02-BORDER-ROUTER-LAPTOP-N1.md` (7.0 KB) - Laptop n1 with BIRD + TINC
-- `03-MESH-NODE-LAPTOP-N2.md` (6.1 KB) - Laptop n2 with TINC only
+- `00-OVERVIEW.md` - General info, Docker architecture, how ping works
+- `01-MOCK-ISP-RPI.md` - Raspberry Pi Docker setup with BIRD
+- `02-BORDER-ROUTER-LAPTOP-N1.md` - Laptop n1 Docker setup with BIRD + TINC
+- `03-MESH-NODE-LAPTOP-N2.md` - Laptop n2 Docker setup with TINC only
 
 ---
 

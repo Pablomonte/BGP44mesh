@@ -1,37 +1,49 @@
-# Raspberry Pi - Mock ISP Setup
+# Raspberry Pi - Mock ISP Setup (Docker)
 
-Configure Raspberry Pi as a simulated ISP with BIRD BGP daemon.
+Configure Raspberry Pi as a simulated ISP with BIRD BGP daemon using Docker.
 
 ## Device Info
 
 - **Role**: Mock ISP (AS 65001)
 - **IP**: `172.30.0.1/24`
-- **Software**: BIRD only
+- **Docker Service**: `isp-bird`
+- **Network Mode**: Host network (for direct interface access)
 - **Purpose**: Provide BGP upstream, receive routes from Laptop n1
 
 ---
 
-## Step 1: Install BIRD
-
-**⚠️ Repository does NOT handle this - manual installation required**
+## Step 1: Prerequisites
 
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+# Install Docker and Docker Compose
+sudo apt update
+sudo apt install -y docker.io docker-compose-v2
 
-# Install BIRD 2.x
-sudo apt install -y bird2
+# Add user to docker group (optional, to avoid sudo)
+sudo usermod -aG docker $USER
+# Log out and back in for group change to take effect
 
-# Verify
-bird --version
-# Should show: BIRD version 2.x
+# Verify Docker
+docker --version
+docker compose version
 ```
 
 ---
 
-## Step 2: Configure Network Interface
+## Step 2: Clone Repository
 
-Set static IP `172.30.0.1/24`:
+```bash
+# Clone or copy repository to Raspberry Pi
+cd ~
+git clone <repository-url> BGP4mesh
+cd BGP4mesh
+```
+
+---
+
+## Step 3: Configure Network Interface
+
+Set static IP `172.30.0.1/24` on the physical interface (e.g., `eth0`):
 
 ```bash
 # Example for systemd-networkd
@@ -54,110 +66,142 @@ ip addr show eth0
 # Verify: 172.30.0.1/24 assigned
 ```
 
+**Alternative**: If using NetworkManager or `/etc/network/interfaces`, configure accordingly.
+
 ---
 
-## Step 3: Configure BIRD
+## Step 4: Update ISP BIRD Configuration
 
-**Use repository config**: `configs/isp-bird/bird.conf`
+The repository's ISP config needs to be updated for the hardware test IPs.
 
 ```bash
-# Copy config from repository
-sudo mkdir -p /etc/bird
-sudo cp ~/BGP4mesh/configs/isp-bird/bird.conf /etc/bird/
+# Backup original config
+cp configs/isp-bird/bird.conf configs/isp-bird/bird.conf.original
+
+# Edit config
+nano configs/isp-bird/bird.conf
 ```
 
-**Required edits**:
-```bash
-sudo nano /etc/bird/bird.conf
-```
+**Update the BGP protocol section** (lines 40-80):
 
-Change line 7:
+Change:
 ```conf
-router id 172.30.0.1;  # ← Already correct
+protocol bgp customer {
+    description "Customer AS 65000 (Border Router)";
+    local 10.42.0.228 as 65001;  # ← Change this
+    neighbor 10.42.0.100 as 65000;  # ← Change this
 ```
 
-Change line 44 (BGP neighbor):
+To:
 ```conf
-neighbor 172.30.0.100 as 65000;  # ← Must match Laptop n1 IP
+protocol bgp customer {
+    description "Customer AS 65000 (Border Router)";
+    local 172.30.0.1 as 65001;  # ← Raspberry Pi IP
+    neighbor 172.30.0.100 as 65000;  # ← Laptop n1 IP
 ```
 
-**Key sections in config**:
+**Update the import filter** to accept TINC mesh subnet (lines 48-64):
 
-1. **Static routes** (lines 27-38): Announces `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`
-2. **BGP import filter** (lines 50-66): 
-   - ✅ Accepts customer routes (10.100.0.0/24, 10.200.0.0/24)
-   - ✅ **SHOULD accept 44.30.127.0/24** (mesh subnet) ← Critical for ping to work!
-3. **BGP export filter** (lines 69-76): Announces ISP routes to customer
-
-**⚠️ Important**: The default config **rejects** `44.30.127.0/24`. To allow Mock-ISP to ping Laptop n2, **modify import filter**:
-
-```bash
-sudo nano /etc/bird/bird.conf
-```
-
-Change lines 57-61 to:
+Change:
 ```conf
         import filter {
             # Accept customer prefixes
-            if net ~ [10.100.0.0/24, 10.200.0.0/24, 44.30.127.0/24] then {
-                print "ISP (Primary): Accepting customer route ", net, " from AS65000";
+            if net ~ [10.100.0.0/24, 10.200.0.0/24] then {
+                print "ISP: Accepting customer route ", net, " from AS65000";
                 accept;
             }
+
+            # Reject TINC mesh internal network (should not be announced)
+            if net ~ [10.0.0.0/24] then {
+                print "ISP: Rejecting internal mesh route ", net;
+                reject;
+            }
+
+            # Reject anything else
+            print "ISP: Rejecting unknown route ", net;
+            reject;
+        };
+```
+
+To:
+```conf
+        import filter {
+            # Accept customer prefixes
+            if net ~ [10.100.0.0/24, 10.200.0.0/24] then {
+                print "ISP: Accepting customer route ", net, " from AS65000";
+                accept;
+            }
+
+            # CRITICAL: Accept TINC mesh subnet so Mock-ISP can ping Laptop n2
+            if net ~ [44.30.127.0/24] then {
+                print "ISP: Accepting TINC mesh route ", net, " from AS65000";
+                accept;
+            }
+
+            # Reject anything else
+            print "ISP: Rejecting unknown route ", net;
+            reject;
+        };
 ```
 
 ---
 
-## Step 4: Start BIRD
+## Step 5: Deploy ISP with Docker Compose
+
+Use the standalone ISP compose file:
 
 ```bash
-# Enable service
-sudo systemctl enable bird
-
-# Start BIRD
-sudo systemctl start bird
+# Deploy ISP container
+docker compose -f docker-compose.isp.yml up -d --build
 
 # Check status
-sudo systemctl status bird
-
-# Verify BIRD is running
-sudo birdc show status
+docker ps | grep isp-bird
+docker logs isp-bird
 ```
+
+The container runs in **host network mode**, so it uses the host's `eth0` interface directly.
 
 ---
 
-## Step 5: Verify Configuration
+## Step 6: Verify Configuration
 
 ```bash
+# Check container is running
+docker ps | grep isp-bird
+
+# Check BIRD status inside container
+docker exec isp-bird birdc show status
+
 # Check protocols
-sudo birdc show protocols
+docker exec isp-bird birdc show protocols
 
 # Expected output:
 # device1    Device     ---        up
 # kernel1    Kernel     master4    up
 # isp_routes Static     master4    up
-# customer_primary BGP  ---        start/Active  ← Waiting for Laptop n1
+# customer   BGP        ---        start/Active  ← Waiting for Laptop n1
 
 # Check static routes
-sudo birdc show route protocol isp_routes
+docker exec isp-bird birdc show route protocol isp_routes
 # Should show: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
 ```
 
 ---
 
-## Step 6: Verify After Laptop n1 is Configured
+## Step 7: Verify After Laptop n1 is Configured
 
 Once Laptop n1 is running:
 
 ```bash
 # Check BGP session
-sudo birdc show protocols customer_primary
+docker exec isp-bird birdc show protocols customer
 # Should show: Established
 
 # Check routes learned from customer
-sudo birdc show route protocol customer_primary
+docker exec isp-bird birdc show route protocol customer
 # Should include: 44.30.127.0/24 via 172.30.0.100
 
-# Check kernel routing table
+# Check kernel routing table (on host)
 ip route | grep 44.30.127
 # Should show: 44.30.127.0/24 via 172.30.0.100 dev eth0
 
@@ -170,6 +214,17 @@ ping -c 5 44.30.127.2
 
 ## Troubleshooting
 
+### Container Not Starting
+
+```bash
+# Check logs
+docker logs isp-bird
+
+# Check if port 179 is already in use
+sudo netstat -tlnp | grep 179
+# If BIRD is running on host, stop it: sudo systemctl stop bird
+```
+
 ### BGP Not Establishing
 
 ```bash
@@ -177,24 +232,24 @@ ping -c 5 44.30.127.2
 ping -c 3 172.30.0.100
 
 # Check BIRD logs
-sudo journalctl -u bird -n 50
+docker logs isp-bird
 
-# Check firewall
+# Check firewall (BGP port 179)
 sudo iptables -L -n | grep 179
 # Allow BGP: sudo iptables -A INPUT -p tcp --dport 179 -j ACCEPT
 
-# Restart BIRD
-sudo systemctl restart bird
+# Restart container
+docker compose -f docker-compose.isp.yml restart isp-bird
 ```
 
 ### No Route to 44.30.127.0/24
 
 ```bash
 # Verify import filter accepts it
-sudo birdc show protocols all customer_primary | grep -A 10 "Import filter"
+docker exec isp-bird birdc show protocols all customer | grep -A 10 "Import filter"
 
 # Check if Laptop n1 is announcing it
-sudo birdc show route protocol customer_primary
+docker exec isp-bird birdc show route protocol customer
 
 # If not present, check Laptop n1 export configuration
 ```
@@ -210,7 +265,7 @@ ip route | grep 44.30.127
 ping -c 3 172.30.0.100
 
 # Check BIRD exported route to kernel
-sudo birdc show route all 44.30.127.0/24
+docker exec isp-bird birdc show route all 44.30.127.0/24
 # Should show "kernel1" protocol
 ```
 
@@ -219,12 +274,13 @@ sudo birdc show route all 44.30.127.0/24
 ## Configuration Files Used
 
 From repository:
-- **Main config**: `configs/isp-bird/bird.conf`
-- **Reference**: `docker/bird/Dockerfile` (shows BIRD setup)
+- **Docker Compose**: `docker-compose.isp.yml`
+- **BIRD config**: `configs/isp-bird/bird.conf` (modified for hardware test)
+- **Docker image**: `docker/bird/Dockerfile`
+- **Entrypoint**: `docker/bird/entrypoint.sh`
 
 ---
 
 ## Next Step
 
 Configure **Laptop n1** → See `02-BORDER-ROUTER-LAPTOP-N1.md`
-
