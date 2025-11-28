@@ -147,38 +147,73 @@ docker ps
 
 ---
 
-## Step 6: Exchange TINC Host Files
+## Step 6: Fix TINC Host File Address
+
+**Critical!** The auto-generated TINC host file has `Address = tinc2` (container name) which won't resolve on separate devices. Fix it:
+
+```bash
+# View current host file
+docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
+
+# Fix the Address line to use actual IP
+# For same-switch test (all devices on 172.30.0.0/24):
+docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
+
+# For separate-network test (Laptop n2 on different internet):
+# Use Laptop n2's public/reachable IP instead
+
+# Verify the change
+docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
+# Should show: Address = 172.30.0.101 (or your reachable IP)
+```
+
+**Note for same-switch test**: Laptop n2 also needs an IP on eth0:
+```bash
+# On Laptop n2 host (not in container)
+sudo ip addr add 172.30.0.101/24 dev eth0
+sudo ip link set eth0 up
+```
+
+---
+
+## Step 7: Exchange TINC Host Files
 
 **Critical for connectivity!**
 
 ### Receive node1 host file from Laptop n1:
 
 ```bash
-# Create node1 host file
+# Create node1 host file (with corrected Address from Laptop n1)
 docker exec tinc2 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node1' << 'EOF'
 # Paste content from Laptop n1 here
 # (From Laptop n1: docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1)
+# Make sure Address = 172.30.0.100 (not "tinc1")
 EOF
 ```
 
 ### Send node2 host file to Laptop n1:
 
 ```bash
-# Display host file for Laptop n1
+# Display host file for Laptop n1 (with corrected Address)
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
 # Copy this entire output and send to Laptop n1
 ```
 
-### Verify both host files exist:
+### Verify both host files exist with correct Address:
 
 ```bash
 docker exec tinc2 ls -la /var/run/tinc/bgpmesh/hosts/
 # Should show: node1, node2
+
+# Verify Address lines are IPs (not container names)
+docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
+# node1: Address = 172.30.0.100 (Laptop n1)
+# node2: Address = 172.30.0.101 (Laptop n2) or reachable IP
 ```
 
 ---
 
-## Step 7: Configure TINC to Connect to node1
+## Step 8: Configure TINC to Connect to node1
 
 If the template doesn't include `ConnectTo`, add it:
 
@@ -195,7 +230,7 @@ docker compose -f docker-compose.node2.yml restart tinc2
 
 ---
 
-## Step 8: Verify Connectivity
+## Step 9: Verify Connectivity
 
 ### Check TINC Interface
 
@@ -227,7 +262,7 @@ docker exec tinc2 ip route
 
 ---
 
-## Step 9: Configure Return Route for Mock-ISP
+## Step 10: Configure Return Route for Mock-ISP
 
 For Mock-ISP to successfully ping Laptop n2, ensure routing back to ISP network:
 
@@ -256,7 +291,7 @@ docker exec tinc2 ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
 
 ---
 
-## Step 10: Test from Mock-ISP
+## Step 11: Test from Mock-ISP
 
 Once all devices are configured:
 
@@ -334,9 +369,9 @@ docker compose -f docker-compose.node2.yml restart tinc2
 ### No Connection to node1
 
 ```bash
-# Check node1 host file exists and has Address line
+# Check node1 host file exists and has correct Address line
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node1
-# Must have: Address = <laptop_n1_ip>
+# Must have: Address = 172.30.0.100 (not "tinc1"!)
 
 # Check tinc.conf has ConnectTo
 docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
@@ -347,6 +382,23 @@ docker exec tinc2 tinc -n bgpmesh connect node1
 
 # Check network connectivity to Laptop n1
 # (if on same physical network, should be reachable)
+ping 172.30.0.100  # Test physical connectivity to Laptop n1
+```
+
+### TINC Host Files Have Wrong Address (Container Names)
+
+If host files have `Address = tinc1` or `Address = tinc2` instead of IPs:
+
+```bash
+# Check Address lines
+docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
+
+# If node1 has "Address = tinc1", get corrected file from Laptop n1
+# If node2 has "Address = tinc2", fix it:
+docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
+
+# Restart TINC
+docker compose -f docker-compose.node2.yml restart tinc2
 ```
 
 ### etcd Connection Issues

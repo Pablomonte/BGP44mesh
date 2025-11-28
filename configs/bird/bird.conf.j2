@@ -10,6 +10,12 @@ debug protocols all;
 protocol device {
 }
 
+# Direct protocol to learn routes from directly connected interfaces (e.g., tinc0)
+protocol direct {
+    ipv4;
+    interface "tinc*";  # Learn routes from TINC interfaces
+}
+
 # Kernel protocol for IPv4 route synchronization
 protocol kernel {
     ipv4 {
