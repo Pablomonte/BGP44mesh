@@ -5,13 +5,42 @@ Configure Laptop n2 as a TINC mesh node (no BGP) using Docker containers.
 ## Device Info
 
 - **Role**: TINC mesh node
-- **IP**: `44.30.127.2/24` (TINC only)
+- **TINC IP**: `44.30.127.2/24`
 - **Docker Services**: `tinc2`, `etcd1`
 - **Purpose**: Participate in VPN mesh, be reachable from Mock-ISP
+- **Connectivity**: WiFi (same network as Laptop n1) or Ethernet
+
+## Network Topology
+
+```
+RPi (Mock ISP)          Laptop n1 (BGP+TINC)              Laptop n2 (TINC)
+172.30.0.1              172.30.0.100 + 44.30.127.1        44.30.127.2
+    │                        │                                │
+    │◄──── Ethernet ────────►│                                │
+    │      (direct cable)    │◄───── TINC over WiFi ─────────►│
+    │                        │       (192.168.x.x)            │
+```
 
 ---
 
 ## Step 1: Prerequisites
+
+### 1.1 Connect to WiFi
+
+Ensure Laptop n2 is connected to the **same WiFi network** as Laptop n1:
+
+```bash
+# Check WiFi connection and IP
+ip addr show wlo1 | grep "inet "
+# Or: ip addr show wlan0 | grep "inet "
+# Should show something like: inet 192.168.1.XX/24
+
+# Verify you can reach Laptop n1 via WiFi
+ping -c 3 192.168.1.16
+# Should succeed (replace with Laptop n1's actual WiFi IP)
+```
+
+### 1.2 Install Docker
 
 ```bash
 # Install Docker and Docker Compose
@@ -149,30 +178,32 @@ docker ps
 
 ## Step 6: Fix TINC Host File Address
 
-**Critical!** The auto-generated TINC host file has `Address = tinc2` (container name) which won't resolve on separate devices. Fix it:
+**Critical!** The auto-generated TINC host file has `Address = tinc2` (container name) which won't resolve on separate devices. Fix it with your **WiFi IP**:
 
 ```bash
+# First, find your WiFi IP
+ip addr show wlo1 | grep "inet "
+# Or try: ip addr show wlan0 | grep "inet "
+# Example output: inet 192.168.1.XX/24 ...
+
 # View current host file
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
 
-# Fix the Address line to use actual IP
-# For same-switch test (all devices on 172.30.0.0/24):
-docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
+# Fix the Address line to use your WiFi IP
+# Replace 192.168.1.XX with your actual WiFi IP
+docker exec tinc2 sed -i 's/Address = tinc2/Address = 192.168.1.XX/' /var/run/tinc/bgpmesh/hosts/node2
 
-# For separate-network test (Laptop n2 on different internet):
-# Use Laptop n2's public/reachable IP instead
+# Also fix the Subnet line for the 44.x network
+docker exec tinc2 sed -i 's/Subnet = 10.0.0.2\/32/Subnet = 44.30.127.2\/32/' /var/run/tinc/bgpmesh/hosts/node2
 
-# Verify the change
+# Verify the changes
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
-# Should show: Address = 172.30.0.101 (or your reachable IP)
+# Should show:
+#   Address = 192.168.1.XX (your WiFi IP)
+#   Subnet = 44.30.127.2/32
 ```
 
-**Note for same-switch test**: Laptop n2 also needs an IP on eth0:
-```bash
-# On Laptop n2 host (not in container)
-sudo ip addr add 172.30.0.101/24 dev eth0
-sudo ip link set eth0 up
-```
+**Note**: We use WiFi IP because Laptop n2 connects to Laptop n1 over WiFi, not ethernet.
 
 ---
 
@@ -182,12 +213,22 @@ sudo ip link set eth0 up
 
 ### Receive node1 host file from Laptop n1:
 
+Get the node1 host file from Laptop n1 (run on Laptop n1: `docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1`).
+
+**Important**: The Address should be Laptop n1's **WiFi IP** (e.g., `192.168.1.16`), not ethernet IP.
+
 ```bash
-# Create node1 host file (with corrected Address from Laptop n1)
+# Create node1 host file on Laptop n2
 docker exec tinc2 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node1' << 'EOF'
-# Paste content from Laptop n1 here
-# (From Laptop n1: docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1)
-# Make sure Address = 172.30.0.100 (not "tinc1")
+# Host configuration for node1
+Address = 192.168.1.16
+Port = 655
+Subnet = 44.30.127.1/32
+
+
+-----BEGIN RSA PUBLIC KEY-----
+# Paste the RSA key from Laptop n1 here
+-----END RSA PUBLIC KEY-----
 EOF
 ```
 
@@ -199,16 +240,27 @@ docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
 # Copy this entire output and send to Laptop n1
 ```
 
+On **Laptop n1**, add node2's host file:
+```bash
+# Run on Laptop n1:
+docker exec tinc1 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node2' << 'EOF'
+# Paste node2 content here
+EOF
+
+# Restart TINC on Laptop n1 to pick up new host file
+docker compose -f docker-compose.hardware-n1.yml restart tinc1
+```
+
 ### Verify both host files exist with correct Address:
 
 ```bash
 docker exec tinc2 ls -la /var/run/tinc/bgpmesh/hosts/
 # Should show: node1, node2
 
-# Verify Address lines are IPs (not container names)
+# Verify Address lines are WiFi IPs (not container names)
 docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
-# node1: Address = 172.30.0.100 (Laptop n1)
-# node2: Address = 172.30.0.101 (Laptop n2) or reachable IP
+# node1: Address = 192.168.1.16 (Laptop n1 WiFi IP)
+# node2: Address = 192.168.1.XX (Laptop n2 WiFi IP)
 ```
 
 ---
@@ -239,17 +291,28 @@ docker compose -f docker-compose.node2.yml restart tinc2
 docker exec tinc2 ip addr show tinc0
 # Expected: 44.30.127.2/24 UP
 
-# Check logs
+# Check logs for connection to node1
 docker logs tinc2 | tail -30
-# Should show connection to node1
+# Should show connection established to node1
 ```
 
-### Ping Laptop n1
+### Test WiFi Connectivity to Laptop n1
 
 ```bash
-# Test TINC mesh connectivity
-ping -c 5 44.30.127.1
+# First verify WiFi path works
+ping -c 3 192.168.1.16
 # Should succeed
+```
+
+### Ping Laptop n1 via TINC
+
+```bash
+# Test TINC mesh connectivity (from inside container)
+docker exec tinc2 ping -c 5 44.30.127.1
+# Should succeed
+
+# Or from host (if routing is set up)
+ping -c 5 44.30.127.1
 ```
 
 ### Check Routing Table
@@ -371,7 +434,7 @@ docker compose -f docker-compose.node2.yml restart tinc2
 ```bash
 # Check node1 host file exists and has correct Address line
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node1
-# Must have: Address = 172.30.0.100 (not "tinc1"!)
+# Must have: Address = 192.168.1.16 (Laptop n1's WiFi IP, not "tinc1"!)
 
 # Check tinc.conf has ConnectTo
 docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
@@ -380,9 +443,11 @@ docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
 # Manual connection attempt
 docker exec tinc2 tinc -n bgpmesh connect node1
 
-# Check network connectivity to Laptop n1
-# (if on same physical network, should be reachable)
-ping 172.30.0.100  # Test physical connectivity to Laptop n1
+# Check network connectivity to Laptop n1 via WiFi
+ping 192.168.1.16  # Test WiFi connectivity to Laptop n1
+
+# Check if port 655 is reachable on Laptop n1
+timeout 2 bash -c "echo >/dev/udp/192.168.1.16/655" && echo "Port reachable" || echo "Port blocked"
 ```
 
 ### TINC Host Files Have Wrong Address (Container Names)
@@ -394,8 +459,15 @@ If host files have `Address = tinc1` or `Address = tinc2` instead of IPs:
 docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
 
 # If node1 has "Address = tinc1", get corrected file from Laptop n1
-# If node2 has "Address = tinc2", fix it:
-docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
+# node1 should have Laptop n1's WiFi IP (e.g., 192.168.1.16)
+
+# If node2 has "Address = tinc2", fix it with YOUR WiFi IP:
+docker exec tinc2 sed -i 's/Address = tinc2/Address = 192.168.1.XX/' /var/run/tinc/bgpmesh/hosts/node2
+
+# Also check Subnet lines - should be 44.x network, not 10.x
+docker exec tinc2 grep "Subnet" /var/run/tinc/bgpmesh/hosts/*
+# node1: Subnet = 44.30.127.1/32
+# node2: Subnet = 44.30.127.2/32
 
 # Restart TINC
 docker compose -f docker-compose.node2.yml restart tinc2
@@ -429,9 +501,11 @@ From repository:
 
 ## Verification Checklist
 
+- [ ] Connected to same WiFi network as Laptop n1
 - [ ] TINC service running (`docker ps | grep tinc2`)
 - [ ] tinc0 interface UP with `44.30.127.2/24` (`docker exec tinc2 ip addr show tinc0`)
-- [ ] Can ping Laptop n1 (`44.30.127.1`)
+- [ ] Can ping Laptop n1 WiFi IP (`ping 192.168.1.16`)
+- [ ] Can ping Laptop n1 TINC IP (`ping 44.30.127.1` from inside container)
 - [ ] Route to ISP network exists (via `44.30.127.1`)
 - [ ] **Mock-ISP can ping this device** ✅
 

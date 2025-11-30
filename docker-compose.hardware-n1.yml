@@ -30,11 +30,14 @@ services:
     hostname: tinc1
     cap_add:
       - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     devices:
       - /dev/net/tun
     ports:
-      - "655:655/udp"
-      - "179:179"  # BGP port (bird1 shares this network)
+      - "655:655/tcp"   # Meta connections (authentication)
+      - "655:655/udp"   # Data transfer
+      - "179:179"       # BGP port (bird1 shares this network)
     volumes:
       - ./configs/tinc:/etc/tinc:ro
       - tinc1-data:/var/run/tinc
