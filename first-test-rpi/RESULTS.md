@@ -741,49 +741,6 @@ EOF'
 
 ---
 
-## Next Steps
-
-- [ ] Automate TINC host file management
-- [ ] Persist kernel routes across reboots
-- [ ] Add more mesh nodes to test multi-hop routing
-- [ ] Test failover scenarios (disconnect/reconnect)
-- [ ] Add monitoring with Prometheus/Grafana
-- [ ] Document procedure for adding new nodes
-
----
-
-## Final Verification Checklist
-
-- [x] BGP session established between RPi and Laptop1
-- [x] Routes exchanged via BGP (both directions)
-- [x] TINC mesh active between Laptop1 and Laptop2
-- [x] IP forwarding enabled on Laptop1
-- [x] Laptop1 can reach Laptop2 via TINC
-- [x] Laptop2 can reach Laptop1 via TINC
-- [x] Laptop2 can reach Mock-ISP through tunnel
-- [x] **Mock-ISP can reach Laptop2 (MAIN GOAL)**
-- [x] Return routes configured on Laptop2
-- [x] Kernel routes active on all devices
-- [x] ARP resolution working on TINC interfaces
-- [x] No packet loss on any path
-- [x] Consistent latency (avg 1-2ms through tunnel)
-
----
-
-## Performance Metrics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **BGP Convergence Time** | < 1 second | Session established immediately |
-| **TINC Connection Time** | 2-3 seconds | Initial handshake and key exchange |
-| **Ping Latency (Direct)** | ~0.4ms | RPi → Laptop1 (Ethernet) |
-| **Ping Latency (via TINC)** | ~1.7ms | RPi → Laptop2 (through tunnel) |
-| **Overhead** | ~1.3ms | TINC encryption/decryption overhead |
-| **Packet Loss** | 0% | All paths stable |
-| **BGP Routes** | 4 total | 3 from ISP + 1 mesh route |
-
----
-
 **Test completed successfully! 🎉**
 
 **Date:** November 30, 2025  
@@ -794,6 +751,3 @@ Mock-ISP (Raspberry Pi) can now successfully reach mesh nodes through:
 - ✅ BGP routing (eBGP peering with AS65000)
 - ✅ TINC VPN overlay (encrypted tunnel)
 - ✅ Multi-hop forwarding through border router
-
-**Next deployment:** Add more mesh nodes to test scalability and multi-hop TINC routing.
-
