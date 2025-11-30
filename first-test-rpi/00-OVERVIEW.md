@@ -54,7 +54,7 @@ Each device runs Docker containers:
 
 ### What Repository Provides
 
-✅ **Docker Compose files**: `docker-compose.isp.yml` (RPi), `docker-compose.hardware-n1.yml` (Laptop n1)  
+✅ **Docker Compose files**: `deploy/hardware-test/docker-compose.isp.yml` (RPi), `deploy/hardware-test/docker-compose.border-router.yml` (Laptop n1), `deploy/hardware-test/docker-compose.mesh-node.yml` (Laptop n2)  
 ✅ **Docker images**: `docker/bird/`, `docker/tinc/` with entrypoint scripts  
 ✅ **BIRD configurations**: `configs/isp-bird/bird.conf`, `configs/bird/*.conf`  
 ✅ **TINC templates**: `configs/tinc/*.j2` (rendered by entrypoint scripts)  

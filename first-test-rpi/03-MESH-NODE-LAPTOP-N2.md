@@ -5,39 +5,55 @@ Configure Laptop n2 as a TINC mesh node (no BGP) using Docker containers.
 ## Device Info
 
 - **Role**: TINC mesh node
+- **Ethernet IP**: `172.30.0.101/24` (on switch network)
 - **TINC IP**: `44.30.127.2/24`
 - **Docker Services**: `tinc2`, `etcd1`
 - **Purpose**: Participate in VPN mesh, be reachable from Mock-ISP
-- **Connectivity**: WiFi (same network as Laptop n1) or Ethernet
+- **Connectivity**: Ethernet (connected to same switch as Laptop n1 and RPi)
 
 ## Network Topology
 
 ```
 RPi (Mock ISP)          Laptop n1 (BGP+TINC)              Laptop n2 (TINC)
-172.30.0.1              172.30.0.100 + 44.30.127.1        44.30.127.2
+172.30.0.1              172.30.0.100 + 44.30.127.1        172.30.0.101 + 44.30.127.2
     │                        │                                │
-    │◄──── Ethernet ────────►│                                │
-    │      (direct cable)    │◄───── TINC over WiFi ─────────►│
-    │                        │       (192.168.x.x)            │
+    │◄──── Ethernet ────────►│◄────── Ethernet ──────────────►│
+    │      (switch)          │        (switch)                │
+    │                        │                                │
+    │                        │◄──── TINC VPN Tunnel ─────────►│
+    │                        │      (over 172.30.0.x)         │
 ```
+
+**Physical Setup:**
+- All three devices connected to the same Ethernet switch
+- Switch network: 172.30.0.0/24
+- TINC VPN overlay: 44.30.127.0/24
 
 ---
 
 ## Step 1: Prerequisites
 
-### 1.1 Connect to WiFi
+### 1.1 Connect to Ethernet Switch
 
-Ensure Laptop n2 is connected to the **same WiFi network** as Laptop n1:
+Connect Laptop n2 to the Ethernet switch using a cable. Configure a static IP:
 
 ```bash
-# Check WiFi connection and IP
-ip addr show wlo1 | grep "inet "
-# Or: ip addr show wlan0 | grep "inet "
-# Should show something like: inet 192.168.1.XX/24
+# Check Ethernet interface name (usually eth0, enp0s31f6, or similar)
+ip link show | grep -E "^[0-9]+:" | grep -v "lo\|docker\|br-\|veth"
 
-# Verify you can reach Laptop n1 via WiFi
-ping -c 3 192.168.1.16
-# Should succeed (replace with Laptop n1's actual WiFi IP)
+# Configure static IP on the switch network
+# Replace <interface> with your actual interface name (e.g., eth0, enp0s31f6)
+sudo ip addr add 172.30.0.101/24 dev <interface>
+sudo ip link set <interface> up
+
+# Verify IP configuration
+ip addr show <interface> | grep "inet "
+# Should show: inet 172.30.0.101/24
+
+# Test connectivity to other devices on the switch
+ping -c 3 172.30.0.1    # RPi (Mock-ISP)
+ping -c 3 172.30.0.100  # Laptop n1 (Border Router)
+# Both should succeed
 ```
 
 ### 1.2 Install Docker
@@ -69,15 +85,15 @@ cd BGP4mesh
 
 ---
 
-## Step 3: Create Minimal Docker Compose File
+## Step 3: Docker Compose File
 
-Create a compose file for just TINC node2:
+The repository includes `deploy/hardware-test/docker-compose.mesh-node.yml` for the mesh node. Verify its contents:
 
 ```bash
-nano docker-compose.node2.yml
+cat deploy/hardware-test/docker-compose.mesh-node.yml
 ```
 
-Add:
+**Expected content:**
 ```yaml
 version: '3.8'
 
@@ -91,7 +107,8 @@ services:
     devices:
       - /dev/net/tun
     ports:
-      - "655:655/udp"
+      - "655:655/tcp"   # Meta connections (authentication)
+      - "655:655/udp"   # Data transfer
     volumes:
       - ./configs/tinc:/etc/tinc:ro
       - tinc2-data:/var/run/tinc
@@ -148,26 +165,18 @@ volumes:
   tinc2-data:
 ```
 
----
-
-## Step 4: Update TINC Config Template (Optional)
-
-The TINC config template should work as-is, but verify it includes `ConnectTo` for node1:
-
-```bash
-# Check template
-cat configs/tinc/tinc.conf.j2
-```
-
-If it doesn't have `ConnectTo = node1`, you may need to manually configure after deployment (see Step 7).
+**Key points:**
+- Port 655 exposed on **both TCP and UDP** (critical for TINC authentication)
+- `tinc2-data` volume persists TINC configuration and keys
+- Two internal Docker networks for container communication
 
 ---
 
-## Step 5: Deploy Services
+## Step 4: Deploy Services
 
 ```bash
 # Deploy TINC node2
-docker compose -f docker-compose.node2.yml up -d --build
+docker compose -f deploy/hardware-test/docker-compose.mesh-node.yml up -d --build
 
 # Check status
 docker ps
@@ -176,63 +185,76 @@ docker ps
 
 ---
 
-## Step 6: Fix TINC Host File Address
+## Step 5: Fix TINC Host File Address
 
-**Critical!** The auto-generated TINC host file has `Address = tinc2` (container name) which won't resolve on separate devices. Fix it with your **WiFi IP**:
+**Critical!** The auto-generated TINC host file has `Address = tinc2` (container name) which won't resolve on separate devices. Fix it with your **Ethernet IP** on the switch network:
 
 ```bash
-# First, find your WiFi IP
-ip addr show wlo1 | grep "inet "
-# Or try: ip addr show wlan0 | grep "inet "
-# Example output: inet 192.168.1.XX/24 ...
-
 # View current host file
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
 
-# Fix the Address line to use your WiFi IP
-# Replace 192.168.1.XX with your actual WiFi IP
-docker exec tinc2 sed -i 's/Address = tinc2/Address = 192.168.1.XX/' /var/run/tinc/bgpmesh/hosts/node2
+# Fix the Address line to use your Ethernet IP on the switch
+docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
 
-# Also fix the Subnet line for the 44.x network
+# Fix the Subnet line for the 44.x network (if needed)
 docker exec tinc2 sed -i 's/Subnet = 10.0.0.2\/32/Subnet = 44.30.127.2\/32/' /var/run/tinc/bgpmesh/hosts/node2
 
 # Verify the changes
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
-# Should show:
-#   Address = 192.168.1.XX (your WiFi IP)
-#   Subnet = 44.30.127.2/32
 ```
 
-**Note**: We use WiFi IP because Laptop n2 connects to Laptop n1 over WiFi, not ethernet.
+**Expected output:**
+```
+# Host configuration for node2
+Address = 172.30.0.101
+Port = 655
+Subnet = 44.30.127.2/32
+
+-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEA5cbOfK13bTBQi9GtLo6krkmFEuftUvY7gfU8i+AF8uvfjOSgE1D+
+... (your unique key) ...
+-----END RSA PUBLIC KEY-----
+```
 
 ---
 
-## Step 7: Exchange TINC Host Files
+## Step 6: Exchange TINC Host Files
 
 **Critical for connectivity!**
 
-### Receive node1 host file from Laptop n1:
+### 6.1 Get node1 host file from Laptop n1
 
-Get the node1 host file from Laptop n1 (run on Laptop n1: `docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1`).
+On **Laptop n1**, get the host file:
+```bash
+docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1
+```
 
-**Important**: The Address should be Laptop n1's **WiFi IP** (e.g., `192.168.1.16`), not ethernet IP.
+**Important**: The Address should be Laptop n1's **macvlan IP** (`172.30.0.100`), which is its IP on the switch network.
+
+### 6.2 Create node1 host file on Laptop n2
 
 ```bash
 # Create node1 host file on Laptop n2
 docker exec tinc2 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node1' << 'EOF'
 # Host configuration for node1
-Address = 192.168.1.16
+Address = 172.30.0.100
 Port = 655
 Subnet = 44.30.127.1/32
 
-
 -----BEGIN RSA PUBLIC KEY-----
-# Paste the RSA key from Laptop n1 here
+MIIBCgKCAQEApfuQcJQ2gdEd2WUU1Aav4b0UoWNwtxgWlkxzb6xgPxjyECwPPRBA
+WLuLbHpPWrIRr2txaIEfoukexh4eGirFnvo1S8vdX9S7xQsUvK0h/z20Zdv6d7ny
+yXv75Ponb82kj/ZqjuZUZ6b8SSWiInD0OfZJNGxGQK/UyZ6ZVHL/op8w0QZi+Fub
+WNh8yCzP7EAj1UNRzbkstiiKQrvTllwRJh6u9JMWhZk/ommo7KYVMu0iaGNf0DZ3
+LkAA0KKBKqLgGcS5hJu/4lvq89xaX0mqIu48qouUhBq5vDaeO81c4LbgFNXM71DR
+arbrAh7EodXw41sYZgBqjytGOx0U+W1guQIDAQAB
 -----END RSA PUBLIC KEY-----
 EOF
 ```
 
-### Send node2 host file to Laptop n1:
+**Note:** Replace the RSA key with the actual key from Laptop n1's host file.
+
+### 6.3 Send node2 host file to Laptop n1
 
 ```bash
 # Display host file for Laptop n1 (with corrected Address)
@@ -244,47 +266,72 @@ On **Laptop n1**, add node2's host file:
 ```bash
 # Run on Laptop n1:
 docker exec tinc1 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node2' << 'EOF'
-# Paste node2 content here
+# Paste node2 content here (with Address = 172.30.0.101)
 EOF
 
 # Restart TINC on Laptop n1 to pick up new host file
-docker compose -f docker-compose.hardware-n1.yml restart tinc1
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart tinc1
 ```
 
-### Verify both host files exist with correct Address:
+### 6.4 Verify both host files exist with correct Address
 
 ```bash
 docker exec tinc2 ls -la /var/run/tinc/bgpmesh/hosts/
 # Should show: node1, node2
 
-# Verify Address lines are WiFi IPs (not container names)
+# Verify Address lines are Ethernet IPs (not container names)
 docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
-# node1: Address = 192.168.1.16 (Laptop n1 WiFi IP)
-# node2: Address = 192.168.1.XX (Laptop n2 WiFi IP)
+# node1: Address = 172.30.0.100 (Laptop n1 macvlan IP)
+# node2: Address = 172.30.0.101 (Laptop n2 Ethernet IP)
 ```
 
 ---
 
-## Step 8: Configure TINC to Connect to node1
+## Step 7: Configure TINC to Connect to node1
 
-If the template doesn't include `ConnectTo`, add it:
+The template doesn't include `ConnectTo` by default. Add it:
 
 ```bash
 # Check current config
 docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf
 
-# If ConnectTo is missing, restart with ConnectTo
+# Add ConnectTo directive
 docker exec tinc2 sh -c 'echo "ConnectTo = node1" >> /var/run/tinc/bgpmesh/tinc.conf'
 
-# Restart TINC
-docker compose -f docker-compose.node2.yml restart tinc2
+# Verify the config
+docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf
+```
+
+**Expected tinc.conf:**
+```
+# TINC 1.0 Configuration
+# Generated from template
+
+Name = node2
+Mode = switch
+Cipher = aes-256-cbc
+Digest = sha256
+Port = 655
+Interface = tinc0
+
+# Compression (optional, can add overhead)
+# Compression = 9
+
+# Forwarding
+# DeviceType = tun
+ConnectTo = node1
+```
+
+```bash
+# Restart TINC to apply changes
+docker compose -f deploy/hardware-test/docker-compose.mesh-node.yml restart tinc2
 ```
 
 ---
 
-## Step 9: Verify Connectivity
+## Step 8: Verify Connectivity
 
-### Check TINC Interface
+### 8.1 Check TINC Interface
 
 ```bash
 # Interface should be up
@@ -292,88 +339,81 @@ docker exec tinc2 ip addr show tinc0
 # Expected: 44.30.127.2/24 UP
 
 # Check logs for connection to node1
-docker logs tinc2 | tail -30
-# Should show connection established to node1
+docker exec tinc2 tail -30 /var/run/tinc/bgpmesh/tinc.log | grep -E "PING|PONG|node1|Connected"
+# Should show PING/PONG exchanges with node1
 ```
 
-### Test WiFi Connectivity to Laptop n1
+### 8.2 Test Ethernet Connectivity to Laptop n1
 
 ```bash
-# First verify WiFi path works
-ping -c 3 192.168.1.16
+# Verify Ethernet path works (from host)
+ping -c 3 172.30.0.100
 # Should succeed
 ```
 
-### Ping Laptop n1 via TINC
+### 8.3 Ping Laptop n1 via TINC
 
 ```bash
 # Test TINC mesh connectivity (from inside container)
 docker exec tinc2 ping -c 5 44.30.127.1
 # Should succeed
-
-# Or from host (if routing is set up)
-ping -c 5 44.30.127.1
 ```
 
-### Check Routing Table
+### 8.4 Check Routing Table
 
 ```bash
-# View routes
+# View routes inside container
 docker exec tinc2 ip route
-# Should show: 44.30.127.0/24 dev tinc0 proto kernel
+# Should show: 44.30.127.0/24 dev tinc0 proto kernel scope link src 44.30.127.2
 ```
 
 ---
 
-## Step 10: Configure Return Route for Mock-ISP
+## Step 9: Configure Return Route for Mock-ISP
 
 For Mock-ISP to successfully ping Laptop n2, ensure routing back to ISP network:
 
-### Option A: Add Default Route via Laptop n1
-
 ```bash
-# Add default route through TINC to Laptop n1
-docker exec tinc2 ip route add default via 44.30.127.1 dev tinc0 metric 100
+# Add route to ISP (172.30.0.1) via Laptop n1's TINC address
+docker exec tinc2 ip route add 172.30.0.1 via 44.30.127.1 dev tinc0
 
-# This allows responses to go back through Laptop n1 to Mock-ISP
+# Verify the route was added
+docker exec tinc2 ip route | grep 172.30
+# Should show: 172.30.0.1 via 44.30.127.1 dev tinc0
 ```
 
-### Option B: Add Specific Route to ISP Network
-
+**Alternative:** Add route to entire ISP network:
 ```bash
-# Add route to ISP network via Laptop n1
 docker exec tinc2 ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
-
-# This ensures responses to Mock-ISP go via Laptop n1
 ```
 
-**Note**: These routes are temporary. For persistence, you could:
+**Note**: These routes are temporary and will be lost on container restart. For persistence:
 1. Add to a startup script
-2. Create a systemd service
-3. Use a Docker entrypoint script modification
+2. Modify the `tinc-up` script
+3. Use Docker entrypoint modification
 
 ---
 
-## Step 11: Test from Mock-ISP
+## Step 10: Test from Mock-ISP
 
 Once all devices are configured:
 
 ### On Mock-ISP (Raspberry Pi):
 
 ```bash
-# Ping Laptop n2
+# Ping Laptop n2 via TINC
 ping -c 5 44.30.127.2
 # Should succeed ✅ Goal achieved!
 
 # Trace route
 traceroute 44.30.127.2
-# Should show: RPi → Laptop n1 (172.30.0.100) → Laptop n2
+# Should show: RPi → Laptop n1 (172.30.0.100) → Laptop n2 (44.30.127.2)
 ```
 
 ### On Laptop n2 (verify responses):
 
 ```bash
-# Monitor ICMP
+# Monitor ICMP traffic
 docker exec tinc2 tcpdump -i tinc0 icmp
 # Should see echo requests from Mock-ISP and echo replies
 ```
@@ -401,15 +441,31 @@ docker exec tinc2 ls -l /dev/net/tun
 # Should exist
 ```
 
+### Connection Timeout During Authentication
+
+**Symptom:**
+```
+Timeout from node1 (172.30.0.100 port 655) during authentication
+```
+
+**Root Cause:** Only UDP port 655 exposed, but TINC needs TCP for authentication.
+
+**Solution:** Ensure docker-compose.mesh-node.yml has both TCP and UDP:
+```yaml
+ports:
+  - "655:655/tcp"   # Meta connections (authentication)
+  - "655:655/udp"   # Data transfer
+```
+
 ### Ping from Laptop n1 Works, but Mock-ISP Ping Fails
 
 ```bash
 # Check routing on Laptop n2
 docker exec tinc2 ip route
-# Must have route back to 172.30.0.0/24 via 44.30.127.1
+# Must have route back to 172.30.0.1 via 44.30.127.1
 
 # Add route if missing
-docker exec tinc2 ip route add 172.30.0.0/24 via 44.30.127.1 dev tinc0
+docker exec tinc2 ip route add 172.30.0.1 via 44.30.127.1 dev tinc0
 
 # Test again from Mock-ISP
 ```
@@ -426,7 +482,7 @@ docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc-up
 # Should configure 44.30.127.2/24
 
 # Restart TINC
-docker compose -f docker-compose.node2.yml restart tinc2
+docker compose -f deploy/hardware-test/docker-compose.mesh-node.yml restart tinc2
 ```
 
 ### No Connection to node1
@@ -434,7 +490,7 @@ docker compose -f docker-compose.node2.yml restart tinc2
 ```bash
 # Check node1 host file exists and has correct Address line
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node1
-# Must have: Address = 192.168.1.16 (Laptop n1's WiFi IP, not "tinc1"!)
+# Must have: Address = 172.30.0.100 (Laptop n1's macvlan IP, not "tinc1"!)
 
 # Check tinc.conf has ConnectTo
 docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
@@ -443,11 +499,12 @@ docker exec tinc2 cat /var/run/tinc/bgpmesh/tinc.conf | grep ConnectTo
 # Manual connection attempt
 docker exec tinc2 tinc -n bgpmesh connect node1
 
-# Check network connectivity to Laptop n1 via WiFi
-ping 192.168.1.16  # Test WiFi connectivity to Laptop n1
+# Check network connectivity to Laptop n1 via Ethernet
+ping 172.30.0.100  # Test Ethernet connectivity to Laptop n1
 
 # Check if port 655 is reachable on Laptop n1
-timeout 2 bash -c "echo >/dev/udp/192.168.1.16/655" && echo "Port reachable" || echo "Port blocked"
+nc -zv 172.30.0.100 655
+# Should show connection succeeded
 ```
 
 ### TINC Host Files Have Wrong Address (Container Names)
@@ -458,11 +515,11 @@ If host files have `Address = tinc1` or `Address = tinc2` instead of IPs:
 # Check Address lines
 docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
 
-# If node1 has "Address = tinc1", get corrected file from Laptop n1
-# node1 should have Laptop n1's WiFi IP (e.g., 192.168.1.16)
+# If node1 has "Address = tinc1", fix it:
+docker exec tinc2 sed -i 's/Address = tinc1/Address = 172.30.0.100/' /var/run/tinc/bgpmesh/hosts/node1
 
-# If node2 has "Address = tinc2", fix it with YOUR WiFi IP:
-docker exec tinc2 sed -i 's/Address = tinc2/Address = 192.168.1.XX/' /var/run/tinc/bgpmesh/hosts/node2
+# If node2 has "Address = tinc2", fix it:
+docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
 
 # Also check Subnet lines - should be 44.x network, not 10.x
 docker exec tinc2 grep "Subnet" /var/run/tinc/bgpmesh/hosts/*
@@ -470,7 +527,7 @@ docker exec tinc2 grep "Subnet" /var/run/tinc/bgpmesh/hosts/*
 # node2: Subnet = 44.30.127.2/32
 
 # Restart TINC
-docker compose -f docker-compose.node2.yml restart tinc2
+docker compose -f deploy/hardware-test/docker-compose.mesh-node.yml restart tinc2
 ```
 
 ### etcd Connection Issues
@@ -489,25 +546,101 @@ docker exec tinc2 etcdctl --endpoints=http://etcd1:2379 endpoint health
 
 ---
 
-## Configuration Files Used
+## Configuration Files Summary
 
-From repository:
-- **Docker Compose**: `docker-compose.node2.yml` (created)
+### Files from Repository:
+- **Docker Compose**: `deploy/hardware-test/docker-compose.mesh-node.yml`
 - **TINC templates**: `configs/tinc/tinc.conf.j2`, `configs/tinc/tinc-up.j2`, `configs/tinc/tinc-down.j2`
 - **Docker image**: `docker/tinc/Dockerfile`
 - **Entrypoint**: `docker/tinc/entrypoint.sh`
+
+### Generated Files in Container (`/var/run/tinc/bgpmesh/`):
+- `tinc.conf` - Main TINC configuration
+- `tinc-up` - Interface up script (configures 44.30.127.2/24)
+- `tinc-down` - Interface down script
+- `rsa_key.priv` - Private RSA key
+- `rsa_key.pub` - Public RSA key
+- `hosts/node1` - Laptop n1 host file (with public key)
+- `hosts/node2` - This node's host file (with public key)
+- `tinc.log` - TINC daemon log
+
+---
+
+## Final Configuration State
+
+### tinc.conf
+```
+# TINC 1.0 Configuration
+# Generated from template
+
+Name = node2
+Mode = switch
+Cipher = aes-256-cbc
+Digest = sha256
+Port = 655
+Interface = tinc0
+
+# Compression (optional, can add overhead)
+# Compression = 9
+
+# Forwarding
+# DeviceType = tun
+ConnectTo = node1
+```
+
+### hosts/node1
+```
+# Host configuration for node1
+Address = 172.30.0.100
+Port = 655
+Subnet = 44.30.127.1/32
+
+-----BEGIN RSA PUBLIC KEY-----
+... (Laptop n1's public key) ...
+-----END RSA PUBLIC KEY-----
+```
+
+### hosts/node2
+```
+# Host configuration for node2
+Address = 172.30.0.101
+Port = 655
+Subnet = 44.30.127.2/32
+
+-----BEGIN RSA PUBLIC KEY-----
+... (This node's public key) ...
+-----END RSA PUBLIC KEY-----
+```
+
+### Container Network Interfaces
+```
+eth0: 172.23.0.3/16  (cluster-net - internal Docker network)
+eth1: 172.22.0.3/16  (mesh-net - Docker network with gateway)
+tinc0: 44.30.127.2/24 (TINC VPN interface)
+```
+
+### Container Routes
+```
+default via 172.22.0.1 dev eth1
+44.30.127.0/24 dev tinc0 proto kernel scope link src 44.30.127.2
+172.22.0.0/16 dev eth1 proto kernel scope link src 172.22.0.3
+172.23.0.0/16 dev eth0 proto kernel scope link src 172.23.0.3
+172.30.0.1 via 44.30.127.1 dev tinc0  # Return route to ISP
+```
 
 ---
 
 ## Verification Checklist
 
-- [ ] Connected to same WiFi network as Laptop n1
-- [ ] TINC service running (`docker ps | grep tinc2`)
+- [ ] Connected to Ethernet switch with IP 172.30.0.101
+- [ ] Can ping RPi (172.30.0.1) and Laptop n1 (172.30.0.100) from host
+- [ ] Docker services running (`docker ps | grep -E "tinc2|etcd1"`)
 - [ ] tinc0 interface UP with `44.30.127.2/24` (`docker exec tinc2 ip addr show tinc0`)
-- [ ] Can ping Laptop n1 WiFi IP (`ping 192.168.1.16`)
-- [ ] Can ping Laptop n1 TINC IP (`ping 44.30.127.1` from inside container)
-- [ ] Route to ISP network exists (via `44.30.127.1`)
-- [ ] **Mock-ISP can ping this device** ✅
+- [ ] Host files have correct Addresses (172.30.0.x, not container names)
+- [ ] `ConnectTo = node1` in tinc.conf
+- [ ] Can ping Laptop n1 TINC IP (`docker exec tinc2 ping 44.30.127.1`)
+- [ ] Return route to ISP exists (`docker exec tinc2 ip route | grep 172.30`)
+- [ ] **Mock-ISP can ping this device (44.30.127.2)** ✅
 
 ---
 
@@ -523,3 +656,17 @@ This proves:
 - BGP routing works (RPi → Laptop n1)
 - TINC mesh works (Laptop n1 → Laptop n2)
 - Full end-to-end connectivity established
+
+---
+
+## Packet Flow: Mock-ISP → Laptop n2
+
+1. **RPi (172.30.0.1)** sends ICMP to 44.30.127.2
+2. **RPi kernel route:** 44.30.127.0/24 via 172.30.0.100 → forwards to Laptop n1
+3. **Laptop n1 (172.30.0.100)** receives on macvlan interface (eth1)
+4. **IP forwarding** enabled in tinc1 container, looks up route: 44.30.127.0/24 dev tinc0
+5. **TINC** encrypts and sends via UDP to 172.30.0.101:655
+6. **Laptop n2 host** receives on Ethernet, Docker NAT forwards to tinc2 container
+7. **TINC** decrypts and delivers to tinc0 interface
+8. **Destination:** 44.30.127.2 reached
+9. **Return path:** Reply goes via 172.30.0.1 route → 44.30.127.1 → TINC tunnel → Laptop n1 → Ethernet → RPi

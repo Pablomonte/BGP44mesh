@@ -389,7 +389,7 @@ Use this checklist after deployment:
 - `.env` - Environment variables for ISP and macvlan
 - `configs/bird/protocols.conf.j2` - Added ISP BGP protocol with macvlan support
 - `docker/bird/entrypoint.sh` - Added ISP_LOCAL_IP variable handling
-- `docker-compose.external-isp.yml` - External ISP network configuration (macvlan)
+- `deploy/hardware-test/docker-compose.border-router.yml` - Hardware test border router with macvlan (replaces deprecated docker-compose.external-isp.yml)
 
 ### Configuration Flow
 ```
@@ -422,7 +422,7 @@ During development, several networking approaches were tested to achieve externa
 
 ### Failed Approach Details
 
-#### 1. Bridge + NAT (docker-compose.external-isp.yml - old version)
+#### 1. Bridge + NAT (deprecated approach)
 **Attempted Setup:**
 ```yaml
 networks:
@@ -470,7 +470,7 @@ networks:
 
 ### Working Solution
 
-**Macvlan over Wired Ethernet** (docker-compose.external-isp.yml - current version)
+**Macvlan over Wired Ethernet** (deploy/hardware-test/docker-compose.border-router.yml)
 
 **Configuration:**
 ```yaml

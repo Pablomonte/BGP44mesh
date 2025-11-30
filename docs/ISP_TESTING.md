@@ -312,7 +312,7 @@ docker logs isp-bird
 # Common issues:
 # 1. Port 179 conflict
 netstat -tuln | grep 179
-# Solution: Change port in docker-compose.isp.yml
+# Solution: Change port in deploy/hardware-test/docker-compose.isp.yml
 
 # 2. Network conflict
 docker network inspect bgp-isp-net

@@ -544,7 +544,7 @@ Mock-ISP (Raspberry Pi) successfully pings Laptop2 mesh node through:
 ## Key Configuration Points
 
 ### 1. Laptop1 - Docker Compose Configuration
-- **File:** `docker-compose.hardware-n1.yml`
+- **File:** `deploy/hardware-test/docker-compose.border-router.yml`
 - **Key settings:**
   - Macvlan network for ISP connectivity (172.30.0.100/24)
   - Bird1 shares network with tinc1 (`network_mode: "service:tinc1"`)
@@ -656,8 +656,8 @@ docker exec tinc1 ss -tlnp
 
 **Solution:** Full restart of containers with proper dependency order:
 ```bash
-docker compose -f docker-compose.hardware-n1.yml down
-docker compose -f docker-compose.hardware-n1.yml up -d
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml down
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d
 ```
 
 ---
