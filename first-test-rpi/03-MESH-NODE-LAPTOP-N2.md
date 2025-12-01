@@ -121,6 +121,9 @@ services:
       - TINC_NAME=node2
       - TINC_PORT=655
       - TINC_NETNAME=bgpmesh
+      # Host file configuration - set TINC_ADDRESS in .env to this device's reachable IP
+      - TINC_ADDRESS=${TINC_ADDRESS:-}
+      - TINC_SUBNET=44.30.127.2/32
     restart: unless-stopped
 
   etcd1:
@@ -185,21 +188,28 @@ docker ps
 
 ---
 
-## Step 5: Fix TINC Host File Address
+## Step 5: Configure TINC Address (Before First Start)
 
-**Critical!** The auto-generated TINC host file has `Address = tinc2` (container name) which won't resolve on separate devices. Fix it with your **Ethernet IP** on the switch network:
+**Important:** Set the `TINC_ADDRESS` environment variable in `.env` to this device's reachable IP address **before first deploy**:
+
+```bash
+# Create .env file with your Ethernet IP
+cat > .env << 'EOF'
+TINC_ADDRESS=172.30.0.101
+EOF
+
+# Verify the .env file
+cat .env
+```
+
+The `TINC_SUBNET` is already set in docker-compose (`44.30.127.2/32`).
+
+**Note:** The host file is generated once on first start and **preserved across restarts**. If you already deployed without setting `TINC_ADDRESS`, see troubleshooting section below.
+
+After deploying, verify the host file configuration:
 
 ```bash
 # View current host file
-docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
-
-# Fix the Address line to use your Ethernet IP on the switch
-docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
-
-# Fix the Subnet line for the 44.x network (if needed)
-docker exec tinc2 sed -i 's/Subnet = 10.0.0.2\/32/Subnet = 44.30.127.2\/32/' /var/run/tinc/bgpmesh/hosts/node2
-
-# Verify the changes
 docker exec tinc2 cat /var/run/tinc/bgpmesh/hosts/node2
 ```
 
@@ -509,17 +519,23 @@ nc -zv 172.30.0.100 655
 
 ### TINC Host Files Have Wrong Address (Container Names)
 
-If host files have `Address = tinc1` or `Address = tinc2` instead of IPs:
+If host files have `Address = tinc1` or `Address = tinc2` instead of IPs (from older versions or if `TINC_ADDRESS` wasn't set before first deploy):
 
 ```bash
 # Check Address lines
 docker exec tinc2 grep "Address" /var/run/tinc/bgpmesh/hosts/*
 
-# If node1 has "Address = tinc1", fix it:
-docker exec tinc2 sed -i 's/Address = tinc1/Address = 172.30.0.100/' /var/run/tinc/bgpmesh/hosts/node1
+# Option 1: Delete volume to regenerate with correct values (recommended)
+# First, set TINC_ADDRESS in .env
+echo "TINC_ADDRESS=172.30.0.101" > .env
+docker compose -f deploy/hardware-test/docker-compose.mesh-node.yml down
+docker volume rm bgp4mesh-fork-santi_tinc2-data
+docker compose -f deploy/hardware-test/docker-compose.mesh-node.yml up -d --build
 
-# If node2 has "Address = tinc2", fix it:
+# Option 2: Fix manually (preserves existing keys)
+# Fix node2's Address and Subnet:
 docker exec tinc2 sed -i 's/Address = tinc2/Address = 172.30.0.101/' /var/run/tinc/bgpmesh/hosts/node2
+docker exec tinc2 sed -i 's|Subnet = 10.0.0.2/32|Subnet = 44.30.127.2/32|' /var/run/tinc/bgpmesh/hosts/node2
 
 # Also check Subnet lines - should be 44.x network, not 10.x
 docker exec tinc2 grep "Subnet" /var/run/tinc/bgpmesh/hosts/*

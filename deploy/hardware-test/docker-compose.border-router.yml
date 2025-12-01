@@ -6,11 +6,11 @@ version: '3.8'
 
 services:
   bird1:
-    build: ./docker/bird
+    build: ../../docker/bird
     container_name: bird1
     network_mode: "service:tinc1"
     volumes:
-      - ./configs/bird:/etc/bird:ro
+      - ../../configs/bird:/etc/bird:ro
     environment:
       - BGP_AS=${BGP_AS:-65000}
       - ROUTER_ID=192.0.2.1
@@ -25,7 +25,7 @@ services:
       - tinc1
 
   tinc1:
-    build: ./docker/tinc
+    build: ../../docker/tinc
     container_name: tinc1
     hostname: tinc1
     cap_add:
@@ -39,7 +39,7 @@ services:
       - "655:655/udp"   # Data transfer
       - "179:179"       # BGP port (bird1 shares this network)
     volumes:
-      - ./configs/tinc:/etc/tinc:ro
+      - ../../configs/tinc:/etc/tinc:ro
       - tinc1-data:/var/run/tinc
     depends_on:
       - etcd1
@@ -53,6 +53,9 @@ services:
       - TINC_NAME=node1
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      # Host file configuration - set these for hardware test
+      - TINC_ADDRESS=${TINC1_LAN_IP:-172.30.0.100}
+      - TINC_SUBNET=44.30.127.1/32
     restart: unless-stopped
 
   etcd1:
@@ -83,7 +86,7 @@ networks:
   lan-macvlan:
     driver: macvlan
     driver_opts:
-      parent: ${LAN_INTERFACE:-eth0}
+      parent: ${LAN_INTERFACE:-eno1}
       macvlan_mode: bridge
     ipam:
       config:

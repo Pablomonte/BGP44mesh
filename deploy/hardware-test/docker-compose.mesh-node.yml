@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   tinc2:
-    build: ./docker/tinc
+    build: ../../docker/tinc
     container_name: tinc2
     hostname: tinc2
     cap_add:
@@ -13,7 +13,7 @@ services:
       - "655:655/tcp"   # Meta connections (authentication)
       - "655:655/udp"   # Data transfer
     volumes:
-      - ./configs/tinc:/etc/tinc:ro
+      - ../../configs/tinc:/etc/tinc:ro
       - tinc2-data:/var/run/tinc
     depends_on:
       - etcd1
@@ -24,6 +24,9 @@ services:
       - TINC_NAME=node2
       - TINC_PORT=655
       - TINC_NETNAME=bgpmesh
+      # Host file configuration - set TINC_ADDRESS in .env to this device's reachable IP
+      - TINC_ADDRESS=${TINC_ADDRESS:-}
+      - TINC_SUBNET=44.30.127.2/32
     restart: unless-stopped
 
   etcd1:

@@ -13,11 +13,19 @@ TINC_NETNAME="${TINC_NETNAME:-bgpmesh}"
 # Extract node number from name (node1 → 1)
 NODE_ID="${TINC_NAME: -1}"
 
+# Host file configuration (can be overridden via environment)
+# TINC_ADDRESS: reachable IP/hostname for this node (default: container name for docker-compose local testing)
+# TINC_SUBNET: subnet this node announces (default: 44.30.127.x/32 based on node ID)
+TINC_ADDRESS="${TINC_ADDRESS:-tinc$NODE_ID}"
+TINC_SUBNET="${TINC_SUBNET:-44.30.127.$NODE_ID/32}"
+
 echo "Configuration:"
 echo "  Node name: $TINC_NAME"
 echo "  Node ID: $NODE_ID"
 echo "  Port: $TINC_PORT"
 echo "  Network: $TINC_NETNAME"
+echo "  Address: $TINC_ADDRESS"
+echo "  Subnet: $TINC_SUBNET"
 echo ""
 
 # Create TINC directory structure in writable location
@@ -35,21 +43,25 @@ else
     echo "✓ Using existing RSA keys"
 fi
 
-# Always create host file (regenerate on each start)
+# Create host file only if it doesn't exist (preserve manual fixes on restart)
+# The host file contains the public key and network configuration for this node
 if [ -f "$TINC_DIR/rsa_key.pub" ]; then
-    echo "Creating host file..."
-    # Use Docker service name for address resolution (tinc1, tinc2, tinc3)
-    CONTAINER_NAME="tinc$NODE_ID"
-
-    cat > "$TINC_DIR/hosts/$TINC_NAME" << EOF
+    if [ ! -f "$TINC_DIR/hosts/$TINC_NAME" ]; then
+        echo "Creating host file..."
+        cat > "$TINC_DIR/hosts/$TINC_NAME" << EOF
 # Host configuration for $TINC_NAME
-Address = $CONTAINER_NAME
+Address = $TINC_ADDRESS
 Port = $TINC_PORT
-Subnet = 10.0.0.$NODE_ID/32
+Subnet = $TINC_SUBNET
 
 EOF
-    cat "$TINC_DIR/rsa_key.pub" >> "$TINC_DIR/hosts/$TINC_NAME"
-    echo "✓ Host file created (Address = $CONTAINER_NAME)"
+        cat "$TINC_DIR/rsa_key.pub" >> "$TINC_DIR/hosts/$TINC_NAME"
+        echo "✓ Host file created (Address = $TINC_ADDRESS, Subnet = $TINC_SUBNET)"
+    else
+        echo "✓ Using existing host file (preserved across restarts)"
+        echo "  Current configuration:"
+        grep -E "^(Address|Subnet)" "$TINC_DIR/hosts/$TINC_NAME" | sed 's/^/    /'
+    fi
 fi
 
 # Render TINC configuration from template (only if it doesn't exist)

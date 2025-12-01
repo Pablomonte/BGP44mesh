@@ -47,6 +47,7 @@ services:
       - TINC_NAME=node1
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - TINC_SUBNET=44.30.127.1/32
     restart: unless-stopped
 
   tinc2:
@@ -69,6 +70,7 @@ services:
       - TINC_NAME=node2
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - TINC_SUBNET=44.30.127.2/32
     restart: unless-stopped
 
   tinc3:
@@ -91,6 +93,7 @@ services:
       - TINC_NAME=node3
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - TINC_SUBNET=44.30.127.3/32
     restart: unless-stopped
 
   tinc4:
@@ -115,6 +118,7 @@ services:
       - TINC_NAME=node4
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - TINC_SUBNET=44.30.127.4/32
     restart: unless-stopped
 
   tinc5:
@@ -139,6 +143,7 @@ services:
       - TINC_NAME=node5
       - TINC_PORT=${TINC_PORT:-655}
       - TINC_NETNAME=${TINC_NETNAME:-bgpmesh}
+      - TINC_SUBNET=44.30.127.5/32
     restart: unless-stopped
 
   etcd1:

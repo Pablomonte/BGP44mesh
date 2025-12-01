@@ -273,25 +273,25 @@ ip route | grep 44.30.127
 
 ---
 
-## Step 10: Fix TINC Host File Address
+## Step 10: Verify TINC Host File Configuration
 
-**Critical!** The auto-generated TINC host file has `Address = tinc1` (container name) which won't resolve on separate devices. Fix it:
+The TINC host file is now **automatically configured** with the correct Address and Subnet via environment variables in docker-compose:
+- `TINC_ADDRESS`: Set to `172.30.0.100` (from `TINC1_LAN_IP`)
+- `TINC_SUBNET`: Set to `44.30.127.1/32`
+
+**The host file is preserved across restarts** - it's only generated once when the container first starts.
 
 ```bash
-# View current host file
+# Verify the host file has correct configuration
 docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1
-
-# Fix the Address line to use actual IP
-# For same-switch test (all devices on 172.30.0.0/24):
-docker exec tinc1 sed -i 's/Address = tinc1/Address = 172.30.0.100/' /var/run/tinc/bgpmesh/hosts/node1
-
-# For separate-network test (Laptop n2 on different internet):
-# Use Laptop n1's public/reachable IP instead of 172.30.0.100
-
-# Verify the change
-docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1
-# Should show: Address = 172.30.0.100 (or your reachable IP)
+# Should show:
+#   Address = 172.30.0.100
+#   Subnet = 44.30.127.1/32
 ```
+
+**Note**: If you need a different address (e.g., public IP for internet connectivity), you can:
+1. Set `TINC_ADDRESS=<your_ip>` in `.env` file
+2. Rebuild: `docker compose -f deploy/hardware-test/docker-compose.border-router.yml down && docker volume rm bgp4mesh-fork-santi_tinc1-data && docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d --build`
 
 ---
 
@@ -399,11 +399,17 @@ docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart 
 
 ### TINC Host File Has Wrong Address
 
-If host files still have container names like `Address = tinc1`:
+If host files still have container names like `Address = tinc1` (from older versions):
 
 ```bash
-# Fix node1's Address
+# Option 1: Delete volume to regenerate host file with correct values
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml down
+docker volume rm bgp4mesh-fork-santi_tinc1-data
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d --build
+
+# Option 2: Fix manually (preserves existing keys)
 docker exec tinc1 sed -i 's/Address = tinc1/Address = 172.30.0.100/' /var/run/tinc/bgpmesh/hosts/node1
+docker exec tinc1 sed -i 's|Subnet = 10.0.0.1/32|Subnet = 44.30.127.1/32|' /var/run/tinc/bgpmesh/hosts/node1
 
 # Restart to apply
 docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart tinc1
