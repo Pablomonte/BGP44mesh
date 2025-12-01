@@ -1,9 +1,0 @@
----
-- name: reload systemd
-  systemd:
-    daemon_reload: yes
-
-- name: restart bgp-daemon
-  systemd:
-    name: bgp-daemon
-    state: restarted

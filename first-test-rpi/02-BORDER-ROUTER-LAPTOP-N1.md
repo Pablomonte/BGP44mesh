@@ -97,51 +97,23 @@ TINC_NETNAME=bgpmesh
 
 ---
 
-## Step 5: Create Docker Compose Override for Hardware Test
+## Step 5: Verify Standalone Docker Compose File
 
-Create a compose override file for the hardware test:
+The repository includes a **standalone** compose file for hardware test:
 
 ```bash
-nano docker-compose.hardware-test.yml
+# Verify file exists
+cat deploy/hardware-test/docker-compose.border-router.yml
 ```
 
-Add:
-```yaml
-# Docker Compose Override for Hardware Test
-# Provides macvlan network for ISP connectivity
+This file contains only the services needed for Laptop n1:
+- `bird1` - BGP daemon (shares network with tinc1)
+- `tinc1` - VPN mesh node with macvlan for ISP connectivity
+- `etcd1` - Service discovery
 
-version: '3.8'
+**Note**: Unlike `docker-compose.yml` (for local simulation with 5 nodes), this standalone file is designed specifically for the hardware test and uses macvlan for real ISP connectivity.
 
-services:
-  tinc1:
-    networks:
-      mesh-net:
-      cluster-net:
-      isp-net:
-        ipv4_address: 172.30.0.3
-      lan-macvlan:
-        ipv4_address: ${TINC1_LAN_IP:-172.30.0.100}
-    extra_hosts:
-      - "isp-bird:${ISP_NEIGHBOR:-172.30.0.1}"
-
-  bird1:
-    environment:
-      - ISP_ENABLED=true
-      - ISP_NEIGHBOR=${ISP_NEIGHBOR:-172.30.0.1}
-      - ISP_LOCAL_IP=${ISP_LOCAL_IP:-172.30.0.100}
-
-networks:
-  lan-macvlan:
-    driver: macvlan
-    driver_opts:
-      parent: ${LAN_INTERFACE:-eth0}
-      macvlan_mode: bridge
-    ipam:
-      config:
-        - subnet: ${LAN_SUBNET:-172.30.0.0/24}
-          gateway: ${LAN_GATEWAY:-172.30.0.1}
-          ip_range: ${LAN_IP_RANGE:-172.30.0.100/31}
-```
+**Note**: The file is located at `deploy/hardware-test/docker-compose.border-router.yml`.
 
 ---
 
@@ -200,11 +172,36 @@ filter export_to_isp {
 
 ---
 
-## Step 7: Deploy Services
+## Step 7: Enable IP Forwarding
+
+**Critical!** Laptop n1 must route packets between the ISP network and TINC mesh:
 
 ```bash
-# Deploy with hardware test override
-docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml up -d --build
+# Enable IP forwarding (temporary)
+sudo sysctl -w net.ipv4.ip_forward=1
+
+# Make persistent across reboots
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+
+# Verify
+sysctl net.ipv4.ip_forward
+# Should show: net.ipv4.ip_forward = 1
+```
+
+**Optional - Allow forwarding in firewall** (if you have restrictive iptables rules):
+
+```bash
+sudo iptables -A FORWARD -i tinc0 -j ACCEPT
+sudo iptables -A FORWARD -o tinc0 -j ACCEPT
+```
+
+---
+
+## Step 8: Deploy Services
+
+```bash
+# Deploy with standalone hardware test file
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d --build
 
 # Check status
 docker ps
@@ -213,7 +210,7 @@ docker ps
 
 ---
 
-## Step 8: Verify Configuration
+## Step 9: Verify Configuration
 
 ### Check TINC
 
@@ -276,16 +273,38 @@ ip route | grep 44.30.127
 
 ---
 
-## Step 9: Exchange TINC Host Files with Laptop n2
+## Step 10: Verify TINC Host File Configuration
+
+The TINC host file is now **automatically configured** with the correct Address and Subnet via environment variables in docker-compose:
+- `TINC_ADDRESS`: Set to `172.30.0.100` (from `TINC1_LAN_IP`)
+- `TINC_SUBNET`: Set to `44.30.127.1/32`
+
+**The host file is preserved across restarts** - it's only generated once when the container first starts.
+
+```bash
+# Verify the host file has correct configuration
+docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1
+# Should show:
+#   Address = 172.30.0.100
+#   Subnet = 44.30.127.1/32
+```
+
+**Note**: If you need a different address (e.g., public IP for internet connectivity), you can:
+1. Set `TINC_ADDRESS=<your_ip>` in `.env` file
+2. Rebuild: `docker compose -f deploy/hardware-test/docker-compose.border-router.yml down && docker volume rm bgp4mesh-fork-santi_tinc1-data && docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d --build`
+
+---
+
+## Step 11: Exchange TINC Host Files with Laptop n2
 
 **Critical for TINC connectivity!**
 
 ### Get node1 host file:
 
 ```bash
-# Display host file for Laptop n2
+# Display host file for Laptop n2 (with corrected Address)
 docker exec tinc1 cat /var/run/tinc/bgpmesh/hosts/node1
-# Copy this entire output
+# Copy this entire output and send to Laptop n2
 ```
 
 ### Receive node2 host file from Laptop n2:
@@ -299,12 +318,12 @@ docker exec tinc1 sh -c 'cat > /var/run/tinc/bgpmesh/hosts/node2' << 'EOF'
 EOF
 
 # Restart TINC to establish connection
-docker compose restart tinc1
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart tinc1
 ```
 
 ---
 
-## Step 10: Verify After Laptop n2 is Configured
+## Step 12: Verify After Laptop n2 is Configured
 
 ```bash
 # Ping Laptop n2 via TINC
@@ -340,8 +359,21 @@ docker exec bird1 birdc show protocols all isp_primary
 ip addr show | grep 172.30.0.100
 
 # Restart services
-docker compose restart bird1
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart bird1
 ```
+
+### isp_secondary Protocol Failing (Expected)
+
+The BIRD configuration includes a secondary ISP uplink (`isp_secondary`) that expects a peer at `172.31.0.2`. **This is expected to fail** in the hardware test since we only have one ISP link.
+
+```bash
+# Check protocols - isp_secondary will show "start" or "Active"
+docker exec bird1 birdc show protocols
+# isp_primary    BGP    ---    up      Established  ← This is what matters
+# isp_secondary  BGP    ---    start   Active       ← Expected to fail, ignore
+```
+
+**This does not affect the test** - only `isp_primary` needs to establish.
 
 ### TINC Not Connecting
 
@@ -349,15 +381,38 @@ docker compose restart bird1
 # Check logs
 docker logs tinc1 | tail -50
 
-# Verify node2 host file exists
+# Verify host files exist with correct Address
 docker exec tinc1 ls -la /var/run/tinc/bgpmesh/hosts/
 # Should show: node1, node2
+
+# Check Address lines in host files (must be reachable IPs, not container names)
+docker exec tinc1 grep "Address" /var/run/tinc/bgpmesh/hosts/*
+# node1 should have: Address = 172.30.0.100 (or reachable IP)
+# node2 should have: Address = <laptop_n2_ip>
 
 # Check TINC interface
 docker exec tinc1 ip addr show tinc0
 
 # Restart TINC
-docker compose restart tinc1
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart tinc1
+```
+
+### TINC Host File Has Wrong Address
+
+If host files still have container names like `Address = tinc1` (from older versions):
+
+```bash
+# Option 1: Delete volume to regenerate host file with correct values
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml down
+docker volume rm bgp4mesh-fork-santi_tinc1-data
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d --build
+
+# Option 2: Fix manually (preserves existing keys)
+docker exec tinc1 sed -i 's/Address = tinc1/Address = 172.30.0.100/' /var/run/tinc/bgpmesh/hosts/node1
+docker exec tinc1 sed -i 's|Subnet = 10.0.0.1/32|Subnet = 44.30.127.1/32|' /var/run/tinc/bgpmesh/hosts/node1
+
+# Restart to apply
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml restart tinc1
 ```
 
 ### 44.30.127.0/24 Not Announced to ISP
@@ -390,8 +445,21 @@ docker network inspect bgp4mesh-fork-santi_lan-macvlan | grep parent
 ip addr show | grep 172.30.0.100
 
 # If macvlan not created, recreate network
-docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml down
-docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml up -d
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml down
+docker compose -f deploy/hardware-test/docker-compose.border-router.yml up -d --build
+```
+
+### IP Forwarding Not Enabled
+
+If packets don't route between ISP and TINC:
+
+```bash
+# Check if forwarding is enabled
+sysctl net.ipv4.ip_forward
+# Must show: net.ipv4.ip_forward = 1
+
+# Enable if not
+sudo sysctl -w net.ipv4.ip_forward=1
 ```
 
 ---
@@ -399,7 +467,7 @@ docker compose -f docker-compose.yml -f docker-compose.hardware-test.yml up -d
 ## Configuration Files Used
 
 From repository:
-- **Docker Compose**: `docker-compose.yml`, `docker-compose.hardware-test.yml` (created)
+- **Docker Compose**: `deploy/hardware-test/docker-compose.border-router.yml` (standalone file for hardware test)
 - **Environment**: `.env` (created)
 - **BIRD configs**: `configs/bird/bird.conf.j2`, `configs/bird/protocols.conf.j2`, `configs/bird/filters.conf` (modified)
 - **TINC templates**: `configs/tinc/*.j2`

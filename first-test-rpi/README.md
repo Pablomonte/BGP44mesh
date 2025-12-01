@@ -9,17 +9,17 @@ Follow these documents **in order**:
 
 1. **[00-OVERVIEW.md](./00-OVERVIEW.md)** - Architecture and prerequisites (~5 min read)
 2. **[01-MOCK-ISP-RPI.md](./01-MOCK-ISP-RPI.md)** - Raspberry Pi Docker setup (~15 min)
-3. **[02-BORDER-ROUTER-LAPTOP-N1.md](./02-BORDER-ROUTER-LAPTOP-N1.md)** - Laptop n1 Docker setup (~20 min)
-4. **[03-MESH-NODE-LAPTOP-N2.md](./03-MESH-NODE-LAPTOP-N2.md)** - Laptop n2 Docker setup (~15 min)
+3. **[02-BORDER-ROUTER-LAPTOP-N1.md](./02-BORDER-ROUTER-LAPTOP-N1.md)** - Laptop n1 Docker setup (~25 min)
+4. **[03-MESH-NODE-LAPTOP-N2.md](./03-MESH-NODE-LAPTOP-N2.md)** - Laptop n2 Docker setup (~20 min)
 
-**Total time**: ~55 minutes
+**Total time**: ~65 minutes
 
 ## Architecture
 
 ```
 Raspberry Pi (Docker)          Laptop n1 (Docker)              Laptop n2 (Docker)
 isp-bird container          bird1 + tinc1 containers          tinc2 container
-172.30.0.1/24              172.30.0.100/24 + 44.30.127.1/24    44.30.127.2/24
+172.30.0.1/24              172.30.0.100/24 + 44.30.127.1/24    172.30.0.101/24 + 44.30.127.2/24
 AS 65001, BIRD             AS 65000, BIRD + TINC               TINC only
      │                          │                                  │
      │◄─────── BGP eBGP ────────►│◄──── TINC VPN Mesh ────────────►│
@@ -30,9 +30,11 @@ AS 65001, BIRD             AS 65000, BIRD + TINC               TINC only
 
 | Device | Docker Services | IPs | Network Setup |
 |--------|----------------|-----|---------------|
-| Raspberry Pi | `isp-bird` | 172.30.0.1/24 | Host network mode |
+| Raspberry Pi | `isp-bird` | 172.30.0.1/24 (eth0) | Host network mode |
 | Laptop n1 | `bird1` + `tinc1` + `etcd1` | 172.30.0.100/24 (macvlan) + 44.30.127.1/24 (TINC) | Macvlan + Docker networks |
-| Laptop n2 | `tinc2` + `etcd1` | 44.30.127.2/24 (TINC) | Docker networks |
+| Laptop n2 | `tinc2` + `etcd1` | 172.30.0.101/24 (eth0) + 44.30.127.2/24 (TINC) | Docker networks |
+
+**Note**: For same-switch test, Laptop n2 needs `172.30.0.101/24` on eth0 for TINC underlay connectivity.
 
 ## Success Test
 
@@ -41,6 +43,10 @@ After completing all setup:
 ```bash
 # On Raspberry Pi (from host or inside isp-bird container)
 ping -c 5 44.30.127.2
+# Should succeed ✅
+
+# Also test from Laptop n2 to RPi (bidirectional)
+docker exec tinc2 ping -c 5 172.30.0.1
 # Should succeed ✅
 ```
 
@@ -70,4 +76,3 @@ ping -c 5 44.30.127.2
 ---
 
 **Start with**: `00-OVERVIEW.md`
-

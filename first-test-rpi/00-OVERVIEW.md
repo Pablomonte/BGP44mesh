@@ -9,7 +9,7 @@ Get **Mock-ISP (Raspberry Pi)** to ping **Laptop n2** through BGP routing and TI
 Raspberry Pi (Docker)          Laptop n1 (Docker)              Laptop n2 (Docker)
 isp-bird container          bird1 + tinc1 + etcd1            tinc2 + etcd1
 AS 65001, BIRD              AS 65000, BIRD + TINC             TINC only
-172.30.0.1/24              172.30.0.100/24 + 44.30.127.1/24  44.30.127.2/24
+172.30.0.1/24              172.30.0.100/24 + 44.30.127.1/24  172.30.0.101/24 + 44.30.127.2/24
      │                          │                                  │
      │◄─────── BGP eBGP ────────►│◄──── TINC VPN Mesh ────────────►│
      │                          │                                  │
@@ -19,7 +19,10 @@ AS 65001, BIRD              AS 65000, BIRD + TINC             TINC only
 
 ## Network Subnets
 
-- **ISP Network**: `172.30.0.0/24` (physical connection between RPi and Laptop n1)
+- **ISP Network**: `172.30.0.0/24` (physical connection between all devices via switch)
+  - RPi: 172.30.0.1
+  - Laptop n1: 172.30.0.100 (macvlan)
+  - Laptop n2: 172.30.0.101 (eth0 - for TINC underlay)
 - **TINC Mesh**: `44.30.127.0/24` (VPN overlay between Laptop n1 and n2)
 
 ## Docker Services
@@ -51,7 +54,7 @@ Each device runs Docker containers:
 
 ### What Repository Provides
 
-✅ **Docker Compose files**: `docker-compose.yml`, `docker-compose.isp.yml`  
+✅ **Docker Compose files**: `deploy/hardware-test/docker-compose.isp.yml` (RPi), `deploy/hardware-test/docker-compose.border-router.yml` (Laptop n1), `deploy/hardware-test/docker-compose.mesh-node.yml` (Laptop n2)  
 ✅ **Docker images**: `docker/bird/`, `docker/tinc/` with entrypoint scripts  
 ✅ **BIRD configurations**: `configs/isp-bird/bird.conf`, `configs/bird/*.conf`  
 ✅ **TINC templates**: `configs/tinc/*.j2` (rendered by entrypoint scripts)  
@@ -77,24 +80,29 @@ Each device runs Docker containers:
 ## Time Estimate
 
 - Raspberry Pi: 15 minutes
-- Laptop n1: 20 minutes
-- Laptop n2: 15 minutes
+- Laptop n1: 25 minutes
+- Laptop n2: 20 minutes
 - Verification: 5 minutes
-- **Total**: ~55 minutes
+- **Total**: ~65 minutes
 
 ## Critical Configuration Points
 
-1. **Route export on Laptop n1**: Must export TINC subnet (44.30.127.0/24) to ISP
-2. **BGP session**: Must establish between RPi (172.30.0.1) and Laptop n1 (172.30.0.100 via macvlan)
-3. **TINC connectivity**: Laptop n1 and n2 must connect via TINC mesh (44.30.127.x)
-4. **Macvlan setup**: Laptop n1 needs macvlan network for physical ISP connectivity
-5. **ISP import filter**: Must accept 44.30.127.0/24 route from customer
+1. **IP Forwarding on Laptop n1**: Must enable `net.ipv4.ip_forward=1` for routing
+2. **Route export on Laptop n1**: Must export TINC subnet (44.30.127.0/24) to ISP
+3. **BGP session**: Must establish between RPi (172.30.0.1) and Laptop n1 (172.30.0.100 via macvlan)
+4. **TINC connectivity**: Laptop n1 and n2 must connect via TINC mesh (44.30.127.x)
+5. **TINC host file Address**: Must use actual IPs (not container names like "tinc1")
+6. **Macvlan setup**: Laptop n1 needs macvlan network for physical ISP connectivity
+7. **ISP import filter**: Must accept 44.30.127.0/24 route from customer
+8. **Laptop n2 eth0 IP**: Needs 172.30.0.101/24 for TINC underlay (same-switch test)
 
 ## Verification Checklist
 
 - [ ] BGP session `Established` between RPi and Laptop n1
 - [ ] Laptop n1 can ping Laptop n2 via TINC (44.30.127.2)
 - [ ] Mock-ISP has route to `44.30.127.0/24` via `172.30.0.100`
+- [ ] TINC host files have correct Address (IPs, not container names)
+- [ ] IP forwarding enabled on Laptop n1
 - [ ] **Mock-ISP can ping `44.30.127.2`** ✅ Goal achieved!
 
 ## Next Steps
@@ -103,10 +111,11 @@ Each device runs Docker containers:
 2. Install Docker and Docker Compose on each device
 3. Clone repository and configure environment variables
 4. Deploy services with Docker Compose
-5. Exchange TINC host files between Laptop n1 and n2
-6. Verify connectivity and test ping
+5. Fix TINC host file Address lines (use actual IPs)
+6. Exchange TINC host files between Laptop n1 and n2
+7. Configure return route on Laptop n2
+8. Verify connectivity and test ping
 
 ---
 
 **Start with**: `01-MOCK-ISP-RPI.md`
-

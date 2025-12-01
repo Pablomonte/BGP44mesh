@@ -152,7 +152,7 @@ Use the standalone ISP compose file:
 
 ```bash
 # Deploy ISP container
-docker compose -f docker-compose.isp.yml up -d --build
+docker compose -f deploy/hardware-test/docker-compose.isp.yml up -d --build
 
 # Check status
 docker ps | grep isp-bird
@@ -239,7 +239,7 @@ sudo iptables -L -n | grep 179
 # Allow BGP: sudo iptables -A INPUT -p tcp --dport 179 -j ACCEPT
 
 # Restart container
-docker compose -f docker-compose.isp.yml restart isp-bird
+docker compose -f deploy/hardware-test/docker-compose.isp.yml restart isp-bird
 ```
 
 ### No Route to 44.30.127.0/24
@@ -274,7 +274,7 @@ docker exec isp-bird birdc show route all 44.30.127.0/24
 ## Configuration Files Used
 
 From repository:
-- **Docker Compose**: `docker-compose.isp.yml`
+- **Docker Compose**: `deploy/hardware-test/docker-compose.isp.yml`
 - **BIRD config**: `configs/isp-bird/bird.conf` (modified for hardware test)
 - **Docker image**: `docker/bird/Dockerfile`
 - **Entrypoint**: `docker/bird/entrypoint.sh`
