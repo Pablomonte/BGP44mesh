@@ -1,0 +1,16 @@
+# Mock ISP - Raspberry Pi
+# AS 65001 - Announces test prefixes to Border Router
+
+services:
+  bird-isp:
+    build:
+      context: ../../docker/bird
+    container_name: bird-isp
+    hostname: isp
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./bird.conf:/etc/bird/bird.conf:ro
+    network_mode: host  # Uses host networking for BGP on physical interface
+    restart: unless-stopped
+

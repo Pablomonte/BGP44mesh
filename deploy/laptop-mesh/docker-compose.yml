@@ -1,0 +1,22 @@
+# Mesh Node - Laptop n2
+# Netmaker client only (no BGP)
+
+services:
+  netclient:
+    image: gravitl/netclient:v0.24.2
+    container_name: netclient
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+    network_mode: host
+    volumes:
+      - netclient_data:/etc/netclient
+    environment:
+      TOKEN: "${ENROLLMENT_TOKEN}"  # Get from Netmaker server UI/API
+    restart: unless-stopped
+
+volumes:
+  netclient_data:
+
