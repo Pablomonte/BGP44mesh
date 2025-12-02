@@ -14,3 +14,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s \
     CMD birdc show status || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
+

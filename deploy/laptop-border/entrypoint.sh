@@ -7,3 +7,4 @@ echo "BGP AS: ${BGP_AS:-not set}"
 
 # Start BIRD in foreground
 exec bird -f -c /etc/bird/bird.conf
+

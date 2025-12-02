@@ -3,8 +3,7 @@
 
 services:
   bird-isp:
-    build:
-      context: ../../docker/bird
+    build: .
     container_name: bird-isp
     hostname: isp
     cap_add:
