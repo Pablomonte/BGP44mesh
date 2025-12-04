@@ -21,6 +21,12 @@
 rsa_key.priv
 hosts/
 
+# TLS certificates (generated)
+certs/
+*.crt
+*.key
+*.pem
+
 # IDE
 .vscode/
 .idea/

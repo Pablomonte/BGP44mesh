@@ -1,0 +1,4 @@
+:443 {
+	tls /certs/server.crt /certs/server.key
+	reverse_proxy netmaker:8081
+}
