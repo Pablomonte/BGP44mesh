@@ -22,8 +22,7 @@ rsa_key.priv
 hosts/
 
 # TLS certificates (generated)
-certs/
-*.crt
+# Note: Certificate files in deploy/*/certs/ are tracked for documentation
 *.key
 *.pem
 

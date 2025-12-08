@@ -1,1 +1,2 @@
-netmaker-ca.crt
+# Ignore local .env files
+.env
