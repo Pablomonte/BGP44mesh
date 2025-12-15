@@ -1,0 +1,20 @@
+# Mesh Node - Laptop n2
+# Netmaker client only (no BGP)
+
+services:
+  netclient:
+    build: .
+    container_name: netclient
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    # NOTE: net.ipv4.ip_forward=1 must be set on the host (sysctls not allowed with network_mode: host)
+    network_mode: host
+    volumes:
+      - netclient_data:/etc/netclient
+    environment:
+      TOKEN: "${ENROLLMENT_TOKEN}"  # Get from Netmaker server API
+    restart: unless-stopped
+
+volumes:
+  netclient_data:

@@ -1,3 +1,0 @@
-[Service]
-# Wait for TINC interface to be ready
-ExecStartPre=/bin/sh -c 'until ip link show tinc0; do sleep 1; done'

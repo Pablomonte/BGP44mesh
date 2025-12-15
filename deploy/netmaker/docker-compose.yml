@@ -1,0 +1,52 @@
+# Netmaker Server - Core Components Only
+# Provides mesh VPN infrastructure without BGP routing
+
+services:
+  # Netmaker Server
+  netmaker:
+    image: gravitl/netmaker:v0.24.2
+    container_name: netmaker
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      SERVER_NAME: "${SERVER_NAME:-netmaker}"
+      SERVER_HOST: "${SERVER_HOST}"
+      SERVER_API_CONN_STRING: "${SERVER_HOST}"
+      SERVER_HTTP_HOST: "${SERVER_HOST}"
+      API_PORT: "8443"
+      BROKER_ENDPOINT: "mqtt://${SERVER_HOST}:1883"
+      MASTER_KEY: "${MASTER_KEY}"
+      MQ_HOST: "${SERVER_HOST}"
+      MQ_PORT: "1883"
+      DATABASE: "sqlite"
+      NODE_ID: "netmaker-server"
+      VERBOSITY: "3"
+    volumes:
+      - netmaker_data:/root/data
+      - netmaker_certs:/etc/netmaker
+    ports:
+      - "8443:8443"       # API (HTTPS)
+      - "51821:51821/udp" # WireGuard
+    depends_on:
+      - mq
+    restart: unless-stopped
+
+  # MQTT Broker (Mosquitto) for Netmaker
+  mq:
+    image: eclipse-mosquitto:2
+    container_name: netmaker-mq
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mq_data:/mosquitto/data
+    ports:
+      - "1883:1883"
+    restart: unless-stopped
+
+volumes:
+  netmaker_data:
+  netmaker_certs:
+  mq_data:
