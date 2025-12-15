@@ -1,9 +1,9 @@
-# Mesh Node - Laptop n2
-# Netmaker client only (no BGP)
+# Mesh Node - Laptop Client
+# Connects to netmaker.altermundi.net
 
 services:
   netclient:
-    build: .
+    image: gravitl/netclient:v0.24.2
     container_name: netclient
     cap_add:
       - NET_ADMIN
@@ -13,7 +13,7 @@ services:
     volumes:
       - netclient_data:/etc/netclient
     environment:
-      TOKEN: "${ENROLLMENT_TOKEN}"  # Get from Netmaker server API
+      TOKEN: "${ENROLLMENT_TOKEN}"
     restart: unless-stopped
 
 volumes:
