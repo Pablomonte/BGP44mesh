@@ -4,7 +4,9 @@ BGP route distribution over a Netmaker WireGuard mesh network.
 
 ## Overview
 
-This project implements BGP peering between two autonomous systems, with routes distributed to mesh nodes via Netmaker (WireGuard-based VPN).
+This project implements BGP peering between two autonomous systems, with routes distributed to mesh nodes via Netmaker (WireGuard-based VPN mesh).
+
+**Architecture:** A border router (laptop-border) establishes eBGP peering with a simulated ISP (rpi-isp), learns external routes, and redistributes them via a WireGuard mesh managed by Netmaker to any number of mesh nodes (laptop-mesh).
 
 ```
 ┌────────────────┐         ┌─────────────────────────────────┐         ┌────────────────┐
@@ -20,6 +22,13 @@ This project implements BGP peering between two autonomous systems, with routes 
 └────────────────┘         └─────────────────────────────────┘         └────────────────┘
 ```
 
+### Key Design Decisions
+
+- **Netmaker over TINC:** WireGuard-based mesh with centralized management, NAT traversal, and dynamic peer discovery
+- **Distributed deployment:** Runs on real hardware (laptops, RPi) instead of Docker Compose local environment
+- **BIRD 2.x:** Industry-standard routing daemon for BGP and route redistribution
+- **Minimal attack surface:** Border router is the only node with BGP peering; mesh nodes receive routes passively
+
 ## Components
 
 | Directory | Device | Function | Software |
@@ -27,6 +36,24 @@ This project implements BGP peering between two autonomous systems, with routes 
 | `deploy/rpi-isp` | Raspberry Pi | Mock ISP, AS 65001 | BIRD 2 |
 | `deploy/laptop-border` | Laptop | Border router AS 65000 + Netmaker server | BIRD 2, Netmaker, Caddy, Mosquitto |
 | `deploy/laptop-mesh` | Laptop/other | Mesh node | Netclient |
+
+## How It Works
+
+### Data Flow
+
+1. **BGP Peering:** rpi-isp (AS 65001) establishes eBGP session with laptop-border (AS 65000) over physical LAN
+2. **Route Learning:** laptop-border learns external prefixes (192.0.2.0/24, etc.) via BGP
+3. **Route Announcement:** laptop-border announces mesh network (44.30.127.0/24) to ISP
+4. **WireGuard Mesh:** Netmaker creates encrypted tunnels between laptop-border and all mesh nodes
+5. **Route Distribution:** Learned routes are distributed via WireGuard to mesh nodes automatically
+
+### Components Interaction
+
+- **BIRD (Border Router):** Handles BGP protocol, imports/exports routes, integrates with WireGuard interface
+- **Netmaker Server:** Control plane for mesh topology, handles peer discovery, manages WireGuard configs
+- **Netclient:** WireGuard client on each node, establishes tunnels, receives routing updates
+- **Caddy:** Provides HTTPS termination for Netmaker API (required by netclient v0.24+)
+- **Mosquitto:** MQTT broker for real-time communication between Netmaker server and clients
 
 ## Network addressing
 
