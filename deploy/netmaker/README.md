@@ -1,5 +1,7 @@
 # Netmaker Server Setup (Core Components)
 
+> [← Back to main README](../../README.md)
+
 Runs behind nginx reverse proxy with certbot for Let's Encrypt.
 
 ## Components
@@ -107,6 +109,10 @@ curl -sL 'https://raw.githubusercontent.com/gravitl/netmaker/master/scripts/netc
 # Join network
 netclient join -t <ENROLLMENT_TOKEN>
 ```
+
+For containerized deployments, see:
+- [deploy/netclient/README.md](../netclient/README.md) - Standalone mesh nodes
+- [deploy/bird-border/README.md](../bird-border/README.md) - Border router with BGP
 
 ## Architecture
 

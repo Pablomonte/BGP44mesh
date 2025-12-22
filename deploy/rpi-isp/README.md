@@ -1,5 +1,7 @@
 # Mock ISP Setup (AS 65001)
 
+> [← Back to main README](../../README.md)
+
 Simulates an upstream ISP for testing BGP peering without real Internet connectivity.
 
 ## Purpose
@@ -74,7 +76,7 @@ docker exec bird-isp birdc "show route protocol border_router"
 
 ## Test End-to-End Connectivity
 
-Once the border router is configured as **egress gateway** in Netmaker:
+Once the border router is configured as **egress gateway** in Netmaker (see [../bird-border/README.md](../bird-border/README.md) for setup):
 
 ```bash
 # From RPi, ping any mesh node

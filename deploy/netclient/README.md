@@ -1,10 +1,12 @@
 # Mesh Node Setup
 
+> [← Back to main README](../../README.md)
+
 Connects to the Netmaker server at `netmaker.altermundi.net`.
 
 ## Prerequisites
 
-- The Netmaker server must be deployed first (see `../netmaker/netmaker/SETUP.md`)
+- The Netmaker server must be deployed first (see [../netmaker/README.md](../netmaker/README.md))
 - An enrollment token from the Netmaker server
 
 ## Before deploying
@@ -15,7 +17,7 @@ From the Netmaker server, get the enrollment token:
 
 ```bash
 # On the Netmaker server (or any machine with API access)
-source ../netmaker/netmaker/.env
+source ../netmaker/.env
 
 curl -s "https://netmaker.altermundi.net/api/v1/enrollment-keys" \
   -H "Authorization: Bearer $MASTER_KEY" | jq -r '.[0].token'
@@ -40,6 +42,12 @@ curl -X POST "https://netmaker.altermundi.net/api/v1/enrollment-keys" \
 cp .env.example .env
 # Edit .env and set ENROLLMENT_TOKEN from step 1
 ```
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| ENROLLMENT_TOKEN | Token from Netmaker server (get via API or UI) |
 
 ### 3. Enable IP forwarding on host
 

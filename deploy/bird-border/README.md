@@ -1,5 +1,7 @@
 # Border Router Setup
 
+> [← Back to main README](../../README.md)
+
 Border node that connects the Netmaker mesh to external networks via BGP.
 
 ## Components
@@ -11,7 +13,7 @@ Border node that connects the Netmaker mesh to external networks via BGP.
 
 ## Prerequisites
 
-1. **Netmaker server running** at `netmaker.altermundi.net`
+1. **Netmaker server running** at `netmaker.altermundi.net` (see [../netmaker/README.md](../netmaker/README.md))
 2. **Enrollment token** from Netmaker (create via API or UI)
 3. **Host requirements**:
    - `net.ipv4.ip_forward=1` enabled
@@ -34,6 +36,12 @@ Border node that connects the Netmaker mesh to external networks via BGP.
 cp .env.example .env
 # Edit .env and add ENROLLMENT_TOKEN
 ```
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| ENROLLMENT_TOKEN | Token from Netmaker server (get via API or UI) |
 
 ### 2. Add secondary IP for BGP peering
 
@@ -174,3 +182,5 @@ ip link | grep -E 'netmaker|nm-'
 # The entrypoint auto-detects interfaces matching 'netmaker' or 'nm-*'
 docker logs bird-border
 ```
+
+For detailed Netmaker configuration and troubleshooting, see [../../docs/NETMAKER.md](../../docs/NETMAKER.md).

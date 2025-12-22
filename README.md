@@ -129,7 +129,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-See `deploy/netmaker/SETUP.md` for full instructions.
+See [deploy/netmaker/README.md](deploy/netmaker/README.md) for full instructions.
 
 ### 2. Create Mesh Network
 
@@ -150,7 +150,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-See `deploy/bird-border/SETUP.md` for BGP configuration.
+See [deploy/bird-border/README.md](deploy/bird-border/README.md) for BGP configuration.
 
 ### 4. Configure Egress Gateway
 
@@ -177,7 +177,9 @@ docker compose up -d
 
 ## Testing with Mock ISP
 
-For development without real BGP peering, use a Raspberry Pi as mock ISP:
+For development without real BGP peering, use a Raspberry Pi as mock ISP.
+
+See [deploy/rpi-isp/README.md](deploy/rpi-isp/README.md) for full mock ISP setup instructions.
 
 ```
 ┌─────────────────┐                    ┌─────────────────┐
@@ -262,6 +264,7 @@ deploy/
 ## References
 
 - [Netmaker Documentation](https://docs.netmaker.io/)
+- [Netmaker Technical Reference](docs/NETMAKER.md) (project-specific configuration notes)
 - [BIRD Internet Routing Daemon](https://bird.network.cz/)
 - [BGP RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271)
 - [WireGuard](https://www.wireguard.com/)

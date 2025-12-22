@@ -1,5 +1,7 @@
 # Netmaker configuration
 
+> [← Back to main README](../README.md)
+
 ## Components
 
 | Container | Image | Function |
@@ -106,7 +108,8 @@ sudo update-ca-certificates
 
 ## WireGuard interface
 
-Netclient creates interface named `netmaker` (not `nm-*` as documented elsewhere).
+Netclient typically creates interface named `netmaker` in recent versions.
+Older versions used `nm-<network-id>` pattern (e.g., `nm-mesh`).
 
 BIRD configuration must reference this interface:
 ```
