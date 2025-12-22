@@ -1,0 +1,33 @@
+name: Timestamp on Server
+
+on:
+  push:
+    branches:
+      - "feat/netmaker"
+
+jobs:
+  modify-server:
+    # CAMBIO CLAVE: Esto le dice a GitHub que use TU servidor
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Escribe el archivo en una ruta absoluta del servidor para asegurar que lo encuentres
+      # Si usas solo "time_tracker.txt", se creará dentro de la carpeta _work del runner
+      - name: Create Persistent Timestamp File
+        run: |
+          # Opción A: Guardar en la carpeta del proyecto (persistirá en el disco)
+          echo "Run triggered at: $(date)" >> time_log_cumulative.txt
+          
+          # Opción B: Guardar fuera del directorio de trabajo (ej. en /tmp o home)
+          # echo "Update from GitHub at: $(date)" > /tmp/last_github_run.txt
+          
+          echo "Archivo actualizado en el servidor físico."
+
+      - name: Show location
+        run: |
+          echo "El archivo se encuentra en:"
+          pwd
+          ls -l time_log_cumulative.txt
