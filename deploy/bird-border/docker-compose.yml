@@ -1,0 +1,42 @@
+# Border Router Node
+# BGP peering with ISP + Netmaker mesh connectivity
+#
+# Components:
+#   - netclient: WireGuard mesh (connects to netmaker.altermundi.net)
+#   - bird: BGP daemon (peers with RPi ISP at 172.30.0.1)
+
+services:
+  netclient:
+    image: gravitl/netclient:v0.24.2
+    container_name: netclient
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    network_mode: host
+    volumes:
+      - netclient_data:/etc/netclient
+    environment:
+      TOKEN: "${ENROLLMENT_TOKEN}"
+    healthcheck:
+      test: ["CMD-SHELL", "wg show | grep -q 'interface:'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  bird:
+    build: .
+    container_name: bird-border
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./bird.conf:/etc/bird/bird.conf:ro
+    depends_on:
+      netclient:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  netclient_data:

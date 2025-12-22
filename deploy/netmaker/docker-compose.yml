@@ -1,5 +1,5 @@
 # Netmaker Server - Core Components Only
-# Provides mesh VPN infrastructure without BGP routing
+# Runs behind nginx reverse proxy (TLS handled externally)
 
 services:
   # Netmaker Server
@@ -20,7 +20,7 @@ services:
       API_PORT: "8443"
       BROKER_ENDPOINT: "mqtt://${SERVER_HOST}:1883"
       MASTER_KEY: "${MASTER_KEY}"
-      MQ_HOST: "${SERVER_HOST}"
+      MQ_HOST: "mq"
       MQ_PORT: "1883"
       DATABASE: "sqlite"
       NODE_ID: "netmaker-server"
@@ -29,8 +29,8 @@ services:
       - netmaker_data:/root/data
       - netmaker_certs:/etc/netmaker
     ports:
-      - "8443:8443"       # API (HTTPS)
-      - "51821:51821/udp" # WireGuard
+      - "8443:8443"           # API (HTTP, proxied by nginx)
+      - "51821:51821/udp"      # WireGuard
     depends_on:
       - mq
     restart: unless-stopped

@@ -1,28 +1,57 @@
-# RPi ISP Setup (AS 65001)
+# Mock ISP Setup (AS 65001)
 
-This is a mock ISP that announces test prefixes via BGP to the Border Router.
+Simulates an upstream ISP for testing BGP peering without real Internet connectivity.
 
-## Before deploying
+## Purpose
 
-### 1. Configure IPs
+This mock ISP allows you to:
+- Test BGP session establishment with your border router
+- Verify route announcements in both directions
+- Test end-to-end connectivity from "external" networks to mesh nodes
 
-Edit `bird.conf` and replace:
-- `172.30.0.1` → Your Raspberry Pi's physical IP
-- `172.30.0.100` → Border Router's physical IP (BGP neighbor)
+## Architecture
 
-### 2. Network requirements
-
-- The RPi must be on the same LAN as the Border Router (Laptop n1)
-- Port 179/TCP must be reachable (BGP)
-
-### 3. Use native Docker (not Docker Desktop)
-
-If using Docker Desktop on the RPi, `network_mode: host` won't work properly.
-Use native Docker Engine:
-
-```bash
-docker context use default
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Mock ISP (this)                              │
+│                      AS 65001                                   │
+│                                                                 │
+│   Announces test prefixes:        Receives from border router:  │
+│   - 192.0.2.0/24 (TEST-NET-1)    - 44.30.127.0/24 (mesh)       │
+│   - 198.51.100.0/24 (TEST-NET-2)                               │
+│   - 203.0.113.0/24 (TEST-NET-3)                                │
+│                                                                 │
+│   IP: 172.30.0.1                                               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ BGP (eBGP, port 179)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Border Router                                │
+│                      AS 65000                                   │
+│                                                                 │
+│   IP: 172.30.0.100 (secondary IP for BGP peering)              │
+│   Mesh: 44.30.127.x                                            │
+│   Egress Gateway: announces external routes to mesh            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ WireGuard mesh
+                              ▼
+                         Mesh Nodes
+                        44.30.127.x
+```
+
+## Prerequisites
+
+1. Raspberry Pi on same LAN as Border Router
+2. Docker Engine (not Docker Desktop)
+3. Port 179/TCP accessible
+
+## Configuration
+
+Edit `bird.conf` if your IPs differ:
+- `172.30.0.1` → RPi's IP
+- `172.30.0.100` → Border Router's IP
 
 ## Deploy
 
@@ -33,45 +62,77 @@ docker compose up -d
 ## Verify
 
 ```bash
-# Check BIRD status
-docker exec bird-isp birdc show status
-
-# Check BGP session (should show "Established")
+# BGP session status
 docker exec bird-isp birdc show protocols
 
-# Check routes being announced
+# Routes announced (should show TEST-NET prefixes)
 docker exec bird-isp birdc show route
 
-# Check routes received from Border Router
+# Routes received from Border Router (mesh network)
 docker exec bird-isp birdc "show route protocol border_router"
 ```
 
-## Test prefixes announced
+## Test End-to-End Connectivity
 
-| Prefix | Description |
-|--------|-------------|
+Once the border router is configured as **egress gateway** in Netmaker:
+
+```bash
+# From RPi, ping any mesh node
+ping 44.30.127.3
+
+# Should work because:
+# 1. RPi has route to 44.30.127.0/24 via Border Router (BGP)
+# 2. Border Router forwards to mesh node via WireGuard
+# 3. Mesh node responds via Border Router (egress gateway route)
+# 4. Border Router forwards response back to RPi
+```
+
+## Test Prefixes
+
+| Prefix | Purpose |
+|--------|---------|
 | 192.0.2.0/24 | TEST-NET-1 (RFC 5737) |
 | 198.51.100.0/24 | TEST-NET-2 (RFC 5737) |
 | 203.0.113.0/24 | TEST-NET-3 (RFC 5737) |
 
-## Expected routes received
-
-Once the Border Router and mesh are up, you should receive:
-
-| Prefix | Description |
-|--------|-------------|
-| 44.30.127.0/24 | Netmaker mesh network |
+These are documentation prefixes that should never appear on the real Internet.
 
 ## Troubleshooting
 
-### BGP session not establishing
-- Check both devices are on the same LAN
-- Verify port 179 is not blocked by firewall
-- Check IPs in bird.conf match actual interfaces
+### BGP session stuck in "Active" or "Connect"
 
-### No routes received
-- Verify Border Router has netclient running
-- Check BIRD on Border Router sees the `netmaker` interface:
-  ```bash
-  docker exec bird-border birdc show protocols all direct1
-  ```
+```bash
+# Check connectivity
+ping 172.30.0.100
+
+# Check port
+nc -zv 172.30.0.100 179
+
+# Check BIRD logs
+docker logs bird-isp
+```
+
+### Ping to mesh nodes fails
+
+1. Verify BGP is Established:
+   ```bash
+   docker exec bird-isp birdc show protocols
+   ```
+
+2. Verify route to mesh exists:
+   ```bash
+   docker exec bird-isp birdc show route 44.30.127.0/24
+   ```
+
+3. Verify Border Router is egress gateway:
+   ```bash
+   # On border router host
+   curl -s "https://netmaker.altermundi.net/api/nodes" \
+     -H "Authorization: Bearer $MASTER_KEY" | jq '.[] | select(.isegressgateway==true)'
+   ```
+
+### Routes not being exchanged
+
+Check filters in `bird.conf`:
+- Import filter accepts `44.30.127.0/24`
+- Export filter sends `isp_routes` protocol
