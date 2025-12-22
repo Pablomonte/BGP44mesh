@@ -1,227 +1,271 @@
 # BGP4mesh
 
-BGP route distribution over a Netmaker WireGuard mesh network.
+Run your own Autonomous System (AS) with BGP peering and a WireGuard mesh network.
 
-## Overview
+## Goal
 
-This project implements BGP peering between two autonomous systems, with routes distributed to mesh nodes via Netmaker (WireGuard-based VPN mesh).
+Create an independent AS that:
+- Announces your IP block to the Internet via BGP
+- Provides connectivity to distributed nodes through a WireGuard mesh
+- Enables you to host services accessible from the public Internet
 
-**Architecture:** A border router (laptop-border) establishes eBGP peering with a simulated ISP (rpi-isp), learns external routes, and redistributes them via a WireGuard mesh managed by Netmaker to any number of mesh nodes (laptop-mesh).
+## Architecture
 
 ```
-┌────────────────┐         ┌─────────────────────────────────┐         ┌────────────────┐
-│   rpi-isp      │         │       laptop-border             │         │  laptop-mesh   │
-│   AS 65001     │◄──BGP──►│         AS 65000                │◄──WG───►│   mesh node    │
-│  172.30.0.1    │  :179   │       172.30.0.100              │  :51821 │                │
-│                │         │                                 │         │                │
-│  BIRD          │         │  BIRD + Netmaker + Caddy        │         │  Netclient     │
-│  announces:    │         │  44.30.127.1 (mesh)             │         │  44.30.127.x   │
-│  192.0.2.0/24  │         │                                 │         │                │
-│  198.51.100/24 │         │  exports to BGP:                │         │  receives:     │
-│  203.0.113/24  │         │  44.30.127.0/24                 │         │  ISP routes    │
-└────────────────┘         └─────────────────────────────────┘         └────────────────┘
+                              INTERNET
+                                  │
+                                  │ BGP (your AS announced globally)
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          ISP / IXP (datacenter)                             │
+│                          (not under your control)                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ BGP peering (eBGP)
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         BORDER ROUTER (your AS)                             │
+│                                                                             │
+│   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐                  │
+│   │    BIRD     │     │  netclient  │     │  Egress GW  │                  │
+│   │  AS 65000   │     │  (WireGuard)│     │  announces  │                  │
+│   │             │     │             │     │  external   │                  │
+│   │ announces:  │     │ mesh IP:    │     │  routes to  │                  │
+│   │ 44.30.127.0 │     │ 44.30.127.x │     │  mesh       │                  │
+│   │ /24         │     │             │     │             │                  │
+│   └─────────────┘     └─────────────┘     └─────────────┘                  │
+│                                                                             │
+│   Connects your AS to both: Internet (BGP) and your mesh (WireGuard)       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ WireGuard mesh (Netmaker)
+                                  ▼
+┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│   Mesh Node 1    │    │   Mesh Node 2    │    │   Mesh Node N    │
+│   44.30.127.2    │    │   44.30.127.3    │    │   44.30.127.x    │
+│                  │    │                  │    │                  │
+│   netclient      │    │   netclient      │    │   netclient      │
+│   (anywhere)     │    │   (anywhere)     │    │   (anywhere)     │
+└──────────────────┘    └──────────────────┘    └──────────────────┘
 ```
-
-### Key Design Decisions
-
-- **Netmaker over TINC:** WireGuard-based mesh with centralized management, NAT traversal, and dynamic peer discovery
-- **Distributed deployment:** Runs on real hardware (laptops, RPi) instead of Docker Compose local environment
-- **BIRD 2.x:** Industry-standard routing daemon for BGP and route redistribution
-- **Minimal attack surface:** Border router is the only node with BGP peering; mesh nodes receive routes passively
-
-## Components
-
-| Directory | Device | Function | Software |
-|-----------|--------|----------|----------|
-| `deploy/rpi-isp` | Raspberry Pi | Mock ISP, AS 65001 | BIRD 2 |
-| `deploy/laptop-border` | Laptop | Border router AS 65000 + Netmaker server | BIRD 2, Netmaker, Caddy, Mosquitto |
-| `deploy/laptop-mesh` | Laptop/other | Mesh node | Netclient |
 
 ## How It Works
 
-### Data Flow
+### Outbound (mesh → Internet)
 
-1. **BGP Peering:** rpi-isp (AS 65001) establishes eBGP session with laptop-border (AS 65000) over physical LAN
-2. **Route Learning:** laptop-border learns external prefixes (192.0.2.0/24, etc.) via BGP
-3. **Route Announcement:** laptop-border announces mesh network (44.30.127.0/24) to ISP
-4. **WireGuard Mesh:** Netmaker creates encrypted tunnels between laptop-border and all mesh nodes
-5. **Route Distribution:** Learned routes are distributed via WireGuard to mesh nodes automatically
+1. A mesh node (44.30.127.3) wants to reach the Internet
+2. Traffic goes to the **border router** (egress gateway)
+3. Border router forwards to ISP via BGP peering
+4. Response comes back the same path
 
-### Components Interaction
+### Inbound (Internet → mesh)
 
-- **BIRD (Border Router):** Handles BGP protocol, imports/exports routes, integrates with WireGuard interface
-- **Netmaker Server:** Control plane for mesh topology, handles peer discovery, manages WireGuard configs
-- **Netclient:** WireGuard client on each node, establishes tunnels, receives routing updates
-- **Caddy:** Provides HTTPS termination for Netmaker API (required by netclient v0.24+)
-- **Mosquitto:** MQTT broker for real-time communication between Netmaker server and clients
+1. Someone on the Internet wants to reach 44.30.127.3
+2. BGP routing directs traffic to your ISP (your AS is announced)
+3. ISP sends to your **border router**
+4. Border router forwards via WireGuard mesh to the node
 
-## Network addressing
+### Key Insight: Egress Gateway
+
+The border router must be configured as an **egress gateway** in Netmaker. This announces external routes (e.g., `0.0.0.0/0` or specific ranges) to all mesh nodes, so they know how to reach the Internet through the border router.
+
+Without this, mesh nodes wouldn't know how to route responses back to external IPs.
+
+## Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `deploy/netmaker/` | Public server | Netmaker control plane (mesh management) |
+| `deploy/bird-border/` | Datacenter | Border router: BGP + mesh gateway |
+| `deploy/netclient/` | Any location | Standalone mesh node |
+
+### Netmaker Server (`deploy/netmaker/`)
+
+Central control plane for the WireGuard mesh. Runs on a public server with:
+- Netmaker API (behind nginx with Let's Encrypt)
+- Mosquitto MQTT broker
+- WireGuard coordination (no traffic passes through it)
+
+### Border Router (`deploy/bird-border/`)
+
+The critical component that bridges your AS to the Internet:
+- **BIRD**: BGP daemon, announces your IP block to the ISP
+- **netclient**: Connects to the mesh
+- **Egress Gateway**: Announces external routes to mesh nodes
+
+### Mesh Nodes (`deploy/netclient/`)
+
+Simple nodes that join the mesh:
+- Run netclient to establish WireGuard tunnels
+- Receive routes from egress gateway
+- Can host services accessible from the Internet
+
+## Network Addressing
 
 | Network | CIDR | Purpose |
 |---------|------|---------|
-| Physical LAN | 172.30.0.0/24 | BGP peering between rpi-isp and laptop-border |
-| Netmaker mesh | 44.30.127.0/24 | WireGuard overlay, distributed to all mesh nodes |
-| TEST-NET-1 | 192.0.2.0/24 | Announced by rpi-isp (RFC 5737) |
-| TEST-NET-2 | 198.51.100.0/24 | Announced by rpi-isp (RFC 5737) |
-| TEST-NET-3 | 203.0.113.0/24 | Announced by rpi-isp (RFC 5737) |
+| Your AS block | 44.30.127.0/24 | Public IPs announced via BGP |
+| Mesh overlay | (same as above) | WireGuard mesh uses your public block |
+| BGP peering | (varies) | Link between you and ISP |
 
-## Requirements
+**Note:** In this design, mesh IPs are your public IPs. This means services on mesh nodes are directly reachable from the Internet once BGP is established.
 
-- Docker Engine (not Docker Desktop - `network_mode: host` requires native Docker)
-- Devices on same LAN for BGP peering (rpi-isp ↔ laptop-border)
-- UDP connectivity for WireGuard (port 51821)
+## Deployment
 
-## Deployment order
+### Prerequisites
 
-### 1. rpi-isp (Mock ISP)
+1. **IP allocation**: Obtain IP block from RIR (LACNIC, ARIN, etc.) or lease from provider
+2. **AS number**: Obtain from RIR or use private AS (64512-65534) for testing
+3. **BGP peering**: Agreement with ISP or IXP for BGP session
+4. **Public server**: For Netmaker control plane
+5. **Datacenter presence**: For border router (colocation or VPS with BGP support)
+
+### 1. Deploy Netmaker Server
 
 ```bash
-cd deploy/rpi-isp
-# Edit bird.conf: set correct IPs
+cd deploy/netmaker
+cp .env.example .env
+# Edit .env with your domain and MASTER_KEY
 docker compose up -d
 ```
 
-### 2. laptop-border (Border Router + Netmaker Server)
+See `deploy/netmaker/SETUP.md` for full instructions.
+
+### 2. Create Mesh Network
 
 ```bash
-cd deploy/laptop-border
-
-# Create .env
-cat <<EOF > .env
-SERVER_HOST=172.30.0.100
-MASTER_KEY=$(openssl rand -base64 32)
-EOF
-
-# Generate TLS certificate (required for netclient)
-mkdir -p certs
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout certs/server.key -out certs/server.crt \
-  -subj "/CN=172.30.0.100" -addext "subjectAltName=IP:172.30.0.100"
-
-# Install CA on host
-sudo cp certs/server.crt /usr/local/share/ca-certificates/netmaker.crt
-sudo update-ca-certificates
-
-# Start services
-docker compose up -d
-
-# Wait for netmaker to start, then create network
 source .env
-sleep 10
-
-curl -sk -X POST "https://localhost/api/networks" \
+curl -X POST "https://your-netmaker-domain/api/networks" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"netid": "mesh", "addressrange": "44.30.127.0/24"}'
-
-# Create enrollment key
-curl -sk -X POST "https://localhost/api/v1/enrollment-keys" \
-  -H "Authorization: Bearer $MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"networks": ["mesh"], "tags": ["node"], "unlimited": true}'
-
-# Copy the "token" field from response, add to .env
-echo "ENROLLMENT_TOKEN=<token>" >> .env
-
-# Restart netclient with token
-docker compose up -d --force-recreate netclient
-
-# Restart BIRD to detect netmaker interface
-docker restart bird-border
+  -d '{"netid": "mynet", "addressrange": "44.30.127.0/24"}'
 ```
 
-### 3. laptop-mesh (Mesh Node)
+### 3. Deploy Border Router
 
 ```bash
-cd deploy/laptop-mesh
-
-# Install CA certificate from border router
-scp user@172.30.0.100:/path/to/certs/server.crt /tmp/netmaker.crt
-sudo cp /tmp/netmaker.crt /usr/local/share/ca-certificates/netmaker.crt
-sudo update-ca-certificates
-
-# Enable IP forwarding
-sudo sysctl -w net.ipv4.ip_forward=1
-
-# Create .env with enrollment token from step 2
-echo "ENROLLMENT_TOKEN=<token>" > .env
-
+cd deploy/bird-border
+cp .env.example .env
+# Add ENROLLMENT_TOKEN from Netmaker
 docker compose up -d
+```
+
+See `deploy/bird-border/SETUP.md` for BGP configuration.
+
+### 4. Configure Egress Gateway
+
+Make the border router announce external routes to the mesh:
+
+```bash
+# Via Netmaker API
+curl -X POST "https://your-netmaker-domain/api/nodes/mynet/<node-id>/creategateway" \
+  -H "Authorization: Bearer $MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"ranges":["0.0.0.0/0"],"natEnabled":"no"}'
+```
+
+Or use Netmaker UI: Node → Edit → Enable Egress Gateway → Add range `0.0.0.0/0`
+
+### 5. Deploy Mesh Nodes
+
+```bash
+cd deploy/netclient
+cp .env.example .env
+# Add ENROLLMENT_TOKEN
+docker compose up -d
+```
+
+## Testing with Mock ISP
+
+For development without real BGP peering, use a Raspberry Pi as mock ISP:
+
+```
+┌─────────────────┐                    ┌─────────────────┐
+│   RPi (mock)    │◄───── BGP ────────►│  Border Router  │
+│   AS 65001      │     172.30.0.x     │    AS 65000     │
+│   172.30.0.1    │                    │   172.30.0.100  │
+│                 │                    │   44.30.127.x   │
+│ announces test  │                    │                 │
+│ prefixes        │                    │ egress gateway  │
+└─────────────────┘                    └─────────────────┘
+                                              │
+                                              │ mesh
+                                              ▼
+                                       ┌─────────────────┐
+                                       │  Mesh Nodes     │
+                                       │  44.30.127.x    │
+                                       └─────────────────┘
+```
+
+The border router needs a secondary IP in the RPi's network for BGP peering:
+```bash
+sudo ip addr add 172.30.0.100/24 dev wlp0s20f3
 ```
 
 ## Verification
 
-### BGP status (rpi-isp)
-```bash
-docker exec bird-isp birdc show protocols
-docker exec bird-isp birdc show route
-```
-
-### BGP status (laptop-border)
+### BGP Session
 ```bash
 docker exec bird-border birdc show protocols
 docker exec bird-border birdc show route
-docker exec bird-border birdc "show route export isp"
 ```
 
-### Netmaker status
+### Mesh Connectivity
 ```bash
-# Server health
-curl -sk https://172.30.0.100/api/server/health
-
-# WireGuard interface
 docker exec netclient wg show
-
-# Mesh connectivity
-ping -I 44.30.127.1 172.30.0.1
+ping 44.30.127.x  # other mesh nodes
 ```
 
-## Ports
+### End-to-End (from mock ISP)
+```bash
+# From RPi, should reach any mesh node
+ping 44.30.127.3
+```
 
-| Port | Protocol | Service | Node |
-|------|----------|---------|------|
-| 179 | TCP | BGP | rpi-isp, laptop-border |
-| 443 | TCP | Netmaker API (Caddy TLS) | laptop-border |
-| 1883 | TCP | MQTT (Mosquitto) | laptop-border |
-| 51821 | UDP | WireGuard | laptop-border |
+## Production Considerations
 
-## Files
+### Security
+- Use proper TLS certificates (Let's Encrypt)
+- Enable MQTT authentication
+- Use secrets management for MASTER_KEY
+- Configure firewalls appropriately
+
+### High Availability
+- Multiple border routers with BGP failover
+- Netmaker can run in HA mode
+- Consider anycast for critical services
+
+### IP Space
+- For real deployment, use legitimately obtained IP space
+- 44.30.127.0/24 is used here for testing (AMPRNet allocation)
+- Contact your RIR for production IP allocation
+
+## Project Structure
 
 ```
 deploy/
-├── laptop-border/
-│   ├── docker-compose.yml    # BIRD, Netmaker, Caddy, Mosquitto, Netclient
-│   ├── bird.conf             # BGP config AS 65000
-│   ├── Caddyfile             # TLS reverse proxy
-│   ├── mosquitto.conf        # MQTT broker
-│   ├── Dockerfile            # BIRD container
+├── netmaker/           # Netmaker server (public)
+│   ├── docker-compose.yml
+│   ├── mosquitto.conf
+│   └── SETUP.md
+├── bird-border/        # Border router + netclient
+│   ├── docker-compose.yml
+│   ├── bird.conf
+│   ├── Dockerfile
 │   ├── entrypoint.sh
-│   ├── certs/                # TLS certificates (generated)
 │   └── SETUP.md
-├── laptop-mesh/
-│   ├── docker-compose.yml    # Netclient only
-│   └── SETUP.md
-└── rpi-isp/
-    ├── docker-compose.yml    # BIRD only
-    ├── bird.conf             # BGP config AS 65001
-    ├── Dockerfile
-    ├── entrypoint.sh
+└── netclient/          # Standalone mesh node
+    ├── docker-compose.yml
     └── SETUP.md
 ```
 
-## Known issues
+## References
 
-- Netmaker v0.24.x requires HTTPS. Caddy provides TLS termination with self-signed certificates.
-- `network_mode: host` does not work with Docker Desktop (uses VM). Use native Docker Engine.
-- BIRD must be restarted after netclient creates the WireGuard interface to learn the route.
-- `sysctls` in docker-compose is ignored with `network_mode: host`. Set `ip_forward` on the host.
+- [Netmaker Documentation](https://docs.netmaker.io/)
+- [BIRD Internet Routing Daemon](https://bird.network.cz/)
+- [BGP RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271)
+- [WireGuard](https://www.wireguard.com/)
 
-## Security considerations
+## License
 
-This setup uses insecure defaults for testing:
-
-- Self-signed TLS certificates
-- MQTT broker allows anonymous connections
-- MASTER_KEY stored in plaintext .env files
-
-For production: use proper CA certificates, enable MQTT authentication, use secrets management.
+MIT
