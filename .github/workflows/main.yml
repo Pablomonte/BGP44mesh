@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - "feat/netmaker"
-  worflow_dispatch:
+  workflow_dispatch:
 
 jobs:
   modify-server:
