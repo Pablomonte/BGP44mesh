@@ -2,7 +2,7 @@
 
 > [← Back to main README](../../README.md)
 
-Connects to the Netmaker server at `netmaker.altermundi.net`.
+Connects to the Netmaker server at `${SERVER_HOST}`.
 
 ## Prerequisites
 
@@ -19,21 +19,21 @@ From the Netmaker server, get the enrollment token:
 # On the Netmaker server (or any machine with API access)
 source ../netmaker/.env
 
-curl -s "https://netmaker.altermundi.net/api/v1/enrollment-keys" \
+curl -s "https://${SERVER_HOST}/api/v1/enrollment-keys" \
   -H "Authorization: Bearer $MASTER_KEY" | jq -r '.[0].token'
 ```
 
 Or create a new enrollment key:
 
 ```bash
-curl -X POST "https://netmaker.altermundi.net/api/v1/enrollment-keys" \
+curl -X POST "https://${SERVER_HOST}/api/v1/enrollment-keys" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "networks": ["mesh"],
-    "tags": ["mesh-node"],
-    "unlimited": true
-  }'
+  -d "{
+    \"networks\": [\"${MESH_NETWORK_ID}\"],
+    \"tags\": [\"mesh-node\"],
+    \"unlimited\": true
+  }"
 ```
 
 ### 2. Create `.env` file
@@ -85,10 +85,10 @@ docker logs netclient
 docker exec netclient wg show
 
 # Check mesh connectivity (ping other mesh nodes)
-ping -c 3 44.30.127.1
+ping -c 3 <mesh-node-ip>  # any IP in ${MESH_ADDRESS_RANGE}
 
 # Check routes received via mesh
-ip route | grep 44.30.127
+ip route | grep "$(echo ${MESH_ADDRESS_RANGE} | cut -d/ -f1)"
 ```
 
 ## Troubleshooting
@@ -99,13 +99,13 @@ If netclient can't register:
 
 ```bash
 # Check Netmaker API health
-curl https://netmaker.altermundi.net/api/server/health
+curl https://${SERVER_HOST}/api/server/health
 
 # Verify the enrollment token is correct
 echo $ENROLLMENT_TOKEN | base64 -d | jq .
 
 # Check firewall allows HTTPS and WireGuard
-curl -I https://netmaker.altermundi.net
+curl -I https://${SERVER_HOST}
 ```
 
 ### WireGuard tunnel not established
@@ -126,7 +126,7 @@ Ensure the Border Router is connected to the mesh and announcing routes via BGP.
 
 ```text
                     Netmaker Server
-                netmaker.altermundi.net
+                    ${SERVER_HOST}
                          :443
                           │
          ┌────────────────┼────────────────┐

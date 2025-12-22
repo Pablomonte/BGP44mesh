@@ -4,6 +4,8 @@ set -euo pipefail
 MAX_WAIT="${MAX_WAIT:-60}"
 
 echo "=== BIRD Border Router ==="
+echo "AS: ${BORDER_ROUTER_AS:-unknown}, Router ID: ${BORDER_ROUTER_IP:-unknown}"
+echo "Peering with ISP at ${ISP_IP:-unknown} (AS ${ISP_AS:-unknown})"
 
 # Find Netmaker WireGuard interface (nm-* or netmaker)
 find_interface() {
@@ -30,6 +32,19 @@ done
 
 echo "Found interface: $INTERFACE"
 ip addr show "$INTERFACE" | grep -E "inet |link/"
+
+# Generate BIRD configuration from template
+echo "Generating BIRD configuration from template..."
+envsubst < /etc/bird/bird.conf.template > /etc/bird/bird.conf
+
+# Verify generated configuration
+echo "Verifying BIRD configuration..."
+bird -p -c /etc/bird/bird.conf || {
+    echo "ERROR: Invalid BIRD configuration generated!"
+    echo "--- Generated config ---"
+    cat /etc/bird/bird.conf
+    exit 1
+}
 
 # Prepare BIRD runtime directory
 mkdir -p /run/bird

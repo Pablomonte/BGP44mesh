@@ -9,24 +9,24 @@ Border node that connects the Netmaker mesh to external networks via BGP.
 | Service | Purpose | Network |
 |---------|---------|---------|
 | netclient | WireGuard mesh client | host (creates netmaker interface) |
-| bird | BGP daemon (AS 65000) | host (peers with 172.30.0.1) |
+| bird | BGP daemon (AS ${BORDER_ROUTER_AS}) | host (peers with ${ISP_IP}) |
 
 ## Prerequisites
 
-1. **Netmaker server running** at `netmaker.altermundi.net` (see [../netmaker/README.md](../netmaker/README.md))
+1. **Netmaker server running** at `${SERVER_HOST}` (see [../netmaker/README.md](../netmaker/README.md))
 2. **Enrollment token** from Netmaker (create via API or UI)
 3. **Host requirements**:
    - `net.ipv4.ip_forward=1` enabled
-   - IP address in the 172.30.0.x network (for BGP peering with RPi ISP)
+   - IP address in the BGP peering network (for BGP peering with ISP)
 
 ## Network Configuration
 
 | Address | Role |
 |---------|------|
-| 172.30.0.100 | This host (secondary IP for BGP) |
-| 172.30.0.1 | RPi ISP (BGP neighbor) |
-| 44.30.127.0/24 | Mesh network (Netmaker) |
-| 44.30.127.x | This host (mesh IP, assigned by Netmaker) |
+| ${BORDER_ROUTER_IP} | This host (secondary IP for BGP) |
+| ${ISP_IP} | ISP/Peer (BGP neighbor) |
+| ${MESH_ADDRESS_RANGE} | Mesh network (Netmaker) |
+| (from mesh range) | This host (mesh IP, assigned by Netmaker) |
 
 ## Deploy
 
@@ -45,37 +45,37 @@ cp .env.example .env
 
 ### 2. Add secondary IP for BGP peering
 
-The border router needs an IP in the 172.30.0.x network to peer with the RPi ISP.
+The border router needs an IP in the BGP peering network to peer with the ISP.
 
 **Temporary (until reboot):**
 ```bash
-sudo ip addr add 172.30.0.100/24 dev wlp0s20f3
+sudo ip addr add ${BORDER_ROUTER_IP}/24 dev ${BORDER_ROUTER_INTERFACE}
 ```
 
 **Persistent with NetworkManager:**
 ```bash
-# Find your WiFi connection name
+# Find your connection name
 nmcli con show
 
 # Add secondary IP
-nmcli con mod "<wifi-connection-name>" +ipv4.addresses 172.30.0.100/24
-nmcli con up "<wifi-connection-name>"
+nmcli con mod "<connection-name>" +ipv4.addresses ${BORDER_ROUTER_IP}/24
+nmcli con up "<connection-name>"
 ```
 
 **Persistent with /etc/network/interfaces.d/:**
 ```bash
 cat <<EOF | sudo tee /etc/network/interfaces.d/bgp-peering
-# Secondary IP for BGP peering with RPi ISP
-auto wlp0s20f3:1
-iface wlp0s20f3:1 inet static
-    address 172.30.0.100
+# Secondary IP for BGP peering with ISP
+auto ${BORDER_ROUTER_INTERFACE}:1
+iface ${BORDER_ROUTER_INTERFACE}:1 inet static
+    address ${BORDER_ROUTER_IP}
     netmask 255.255.255.0
 EOF
 ```
 
 Verify connectivity:
 ```bash
-ping -c 2 172.30.0.1
+ping -c 2 ${ISP_IP}
 ```
 
 ### 3. Enable IP forwarding on host
@@ -112,51 +112,55 @@ docker exec bird-border birdc show route
 docker exec bird-border birdc "show route export isp"
 
 # Test mesh connectivity (to another mesh node)
-ping 44.30.127.1
+ping <mesh-node-ip>  # any IP in ${MESH_ADDRESS_RANGE}
 ```
 
 ## Architecture
 
 ```
-                         netmaker.altermundi.net
+                         ${SERVER_HOST}
                                   │
-                                  │ WireGuard (51821/udp)
+                                  │ WireGuard
                                   │
 ┌─────────────────────────────────┼──────────────────────────┐
 │            Border Router        │                          │
 │                                 ▼                          │
 │  ┌───────────────┐      ┌─────────────┐                   │
-│  │   netclient   │──────│  netmaker   │ 44.30.127.x       │
+│  │   netclient   │──────│  netmaker   │ mesh IP           │
 │  │               │      │  interface  │                   │
 │  └───────────────┘      └──────┬──────┘                   │
 │                                │                           │
 │                         ┌──────┴──────┐                   │
 │  BGP :179               │    BIRD     │                   │
-│  ◄──────────────────────│   AS 65000  │                   │
+│  ◄──────────────────────│ AS ${BORDER │                   │
+│                         │  _ROUTER_AS}│                   │
 │                         └─────────────┘                   │
 │                                                            │
-│  Secondary IP: 172.30.0.100 (on WiFi)                     │
+│  Secondary IP: ${BORDER_ROUTER_IP}                        │
 └────────────────────────────────────────────────────────────┘
          │
          │ BGP peering
          ▼
-   RPi ISP (172.30.0.1)
-       AS 65001
+   ISP (${ISP_IP})
+   AS ${ISP_AS}
 ```
 
 ## BGP Configuration
 
-Current `bird.conf` announces:
-- **Export to ISP**: `44.30.127.0/24` (mesh network)
-- **Import from ISP**: `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` (test prefixes)
+Configuration is managed via environment variables in `.env`:
+
+- **Export to ISP**: `${MESH_ADDRESS_RANGE}` (mesh network)
+- **Import from ISP**: Test prefixes (`${TEST_PREFIX_1}`, `${TEST_PREFIX_2}`, `${TEST_PREFIX_3}`)
+
+The BIRD configuration is generated from `bird.conf.template` at container startup using values from your `.env` file.
 
 ## Troubleshooting
 
 ### netclient won't connect
 ```bash
 docker logs netclient
-# Check token is valid and netmaker.altermundi.net is reachable
-curl -s https://netmaker.altermundi.net/api/server/health
+# Check token is valid and Netmaker server is reachable
+curl -s https://${SERVER_HOST}/api/server/health
 ```
 
 ### BIRD won't start
@@ -169,8 +173,8 @@ docker exec netclient wg show
 ### BGP session not established
 ```bash
 docker exec bird-border birdc show protocols all isp
-# Check RPi ISP is reachable
-ping 172.30.0.1
+# Check ISP/peer is reachable
+ping ${ISP_IP}
 ```
 
 ### Interface not detected

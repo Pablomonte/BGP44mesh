@@ -1,8 +1,7 @@
-# BIRD - Border Router (AS 65000)
-# Laptop n1: 172.30.0.100 (physical), 44.30.127.1 (Netmaker)
+# BIRD - Border Router (AS ${BORDER_ROUTER_AS})
 # Routes between ISP and Netmaker mesh
 
-router id 172.30.0.100;
+router id ${BORDER_ROUTER_IP};
 
 log syslog all;
 
@@ -25,25 +24,24 @@ protocol direct {
 
 # eBGP to ISP
 protocol bgp isp {
-    description "ISP AS 65001";
-    local 172.30.0.100 as 65000;
-    neighbor 172.30.0.1 as 65001;
-    
+    description "ISP AS ${ISP_AS}";
+    local ${BORDER_ROUTER_IP} as ${BORDER_ROUTER_AS};
+    neighbor ${ISP_IP} as ${ISP_AS};
+
     ipv4 {
         import filter {
             # Accept ISP test prefixes
-            if net ~ [192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24] then accept;
+            if net ~ [${TEST_PREFIX_1}, ${TEST_PREFIX_2}, ${TEST_PREFIX_3}] then accept;
             reject;
         };
-        
+
         export filter {
             # Announce our mesh network
-            if net ~ [44.30.127.0/24] then accept;
+            if net ~ [${MESH_ADDRESS_RANGE}] then accept;
             reject;
         };
     };
-    
-    hold time 90;
-    keepalive time 30;
-}
 
+    hold time ${BGP_HOLD_TIME};
+    keepalive time ${BGP_KEEPALIVE_TIME};
+}

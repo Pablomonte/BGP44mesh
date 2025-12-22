@@ -15,11 +15,11 @@
 
 | Parameter | Value |
 |-----------|-------|
-| Network ID | mesh |
-| Address range | 44.30.127.0/24 |
-| WireGuard port | 51821/UDP |
+| Network ID | ${MESH_NETWORK_ID} |
+| Address range | ${MESH_ADDRESS_RANGE} |
+| WireGuard port | ${WIREGUARD_PORT}/UDP |
 | API port | 443/TCP (via Caddy) |
-| MQTT port | 1883/TCP |
+| MQTT port | ${MQTT_PORT}/TCP |
 
 ## API
 
@@ -30,19 +30,19 @@ All API calls require the `Authorization: Bearer <MASTER_KEY>` header.
 ### Create network
 
 ```bash
-curl -sk -X POST "https://<SERVER>/api/networks" \
+curl -sk -X POST "https://${SERVER_HOST}/api/networks" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"netid": "mesh", "addressrange": "44.30.127.0/24"}'
+  -d "{\"netid\": \"${MESH_NETWORK_ID}\", \"addressrange\": \"${MESH_ADDRESS_RANGE}\"}"
 ```
 
 ### Create enrollment key
 
 ```bash
-curl -sk -X POST "https://<SERVER>/api/v1/enrollment-keys" \
+curl -sk -X POST "https://${SERVER_HOST}/api/v1/enrollment-keys" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"networks": ["mesh"], "tags": ["node"], "unlimited": true}'
+  -d "{\"networks\": [\"${MESH_NETWORK_ID}\"], \"tags\": [\"node\"], \"unlimited\": true}"
 ```
 
 Response contains `token` field (base64-encoded JSON with server address and key value).
@@ -50,21 +50,21 @@ Response contains `token` field (base64-encoded JSON with server address and key
 ### List hosts
 
 ```bash
-curl -sk "https://<SERVER>/api/hosts" \
+curl -sk "https://${SERVER_HOST}/api/hosts" \
   -H "Authorization: Bearer $MASTER_KEY"
 ```
 
 ### List networks
 
 ```bash
-curl -sk "https://<SERVER>/api/networks" \
+curl -sk "https://${SERVER_HOST}/api/networks" \
   -H "Authorization: Bearer $MASTER_KEY"
 ```
 
 ### Health check
 
 ```bash
-curl -sk "https://<SERVER>/api/server/health"
+curl -sk "https://${SERVER_HOST}/api/server/health"
 ```
 
 ## TLS requirement
@@ -75,7 +75,7 @@ Certificate generation:
 ```bash
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout certs/server.key -out certs/server.crt \
-  -subj "/CN=<IP>" -addext "subjectAltName=IP:<IP>"
+  -subj "/CN=${SERVER_HOST}" -addext "subjectAltName=IP:${SERVER_HOST}"
 ```
 
 Hosts running netclient must trust this certificate:

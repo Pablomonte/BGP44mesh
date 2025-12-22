@@ -31,8 +31,22 @@ services:
     network_mode: host
     cap_add:
       - NET_ADMIN
+    env_file:
+      - .env
+    environment:
+      # BGP Configuration
+      - BORDER_ROUTER_AS=${BORDER_ROUTER_AS:-65000}
+      - BORDER_ROUTER_IP=${BORDER_ROUTER_IP:-172.30.0.100}
+      - ISP_AS=${ISP_AS:-65001}
+      - ISP_IP=${ISP_IP:-172.30.0.1}
+      - MESH_ADDRESS_RANGE=${MESH_ADDRESS_RANGE:-44.30.127.0/24}
+      - TEST_PREFIX_1=${TEST_PREFIX_1:-192.0.2.0/24}
+      - TEST_PREFIX_2=${TEST_PREFIX_2:-198.51.100.0/24}
+      - TEST_PREFIX_3=${TEST_PREFIX_3:-203.0.113.0/24}
+      - BGP_HOLD_TIME=${BGP_HOLD_TIME:-90}
+      - BGP_KEEPALIVE_TIME=${BGP_KEEPALIVE_TIME:-30}
     volumes:
-      - ./bird.conf:/etc/bird/bird.conf:ro
+      - ./bird.conf.template:/etc/bird/bird.conf.template:ro
     depends_on:
       netclient:
         condition: service_healthy

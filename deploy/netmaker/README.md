@@ -17,7 +17,7 @@ Runs behind nginx reverse proxy with certbot for Let's Encrypt.
 
 ```bash
 cat <<EOF > .env
-SERVER_HOST=netmaker.altermundi.net
+SERVER_HOST=your-netmaker-domain.com
 MASTER_KEY=$(openssl rand -base64 32)
 EOF
 ```
@@ -29,10 +29,10 @@ Add to your nginx config:
 ```nginx
 server {
     listen 443 ssl;
-    server_name netmaker.altermundi.net;
+    server_name ${SERVER_HOST};
 
-    ssl_certificate /etc/letsencrypt/live/netmaker.altermundi.net/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/netmaker.altermundi.net/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${SERVER_HOST}/privkey.pem;
 
     location / {
         proxy_pass http://127.0.0.1:8443;
@@ -46,7 +46,7 @@ server {
 
 Then obtain certificate:
 ```bash
-certbot --nginx -d netmaker.altermundi.net
+certbot --nginx -d ${SERVER_HOST}
 ```
 
 ### 3. Firewall requirements
@@ -71,20 +71,20 @@ source .env
 curl -X POST "https://${SERVER_HOST}/api/networks" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "netid": "mesh",
-    "addressrange": "44.30.127.0/24"
-  }'
+  -d "{
+    \"netid\": \"${MESH_NETWORK_ID}\",
+    \"addressrange\": \"${MESH_ADDRESS_RANGE}\"
+  }"
 
 # Create enrollment key
 curl -X POST "https://${SERVER_HOST}/api/v1/enrollment-keys" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "networks": ["mesh"],
-    "tags": ["mesh-node"],
-    "unlimited": true
-  }'
+  -d "{
+    \"networks\": [\"${MESH_NETWORK_ID}\"],
+    \"tags\": [\"mesh-node\"],
+    \"unlimited\": true
+  }"
 ```
 
 Save the `token` field for client enrollment.

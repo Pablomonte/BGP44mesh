@@ -31,8 +31,9 @@ Create an independent AS that:
 │   │  AS 65000   │     │  (WireGuard)│     │  announces  │                  │
 │   │             │     │             │     │  external   │                  │
 │   │ announces:  │     │ mesh IP:    │     │  routes to  │                  │
-│   │ 44.30.127.0 │     │ 44.30.127.x │     │  mesh       │                  │
-│   │ /24         │     │             │     │             │                  │
+│   │ ${MESH_    │     │ from range  │     │  mesh       │                  │
+│   │  ADDRESS_   │     │             │     │             │                  │
+│   │  RANGE}     │     │             │     │             │                  │
 │   └─────────────┘     └─────────────┘     └─────────────┘                  │
 │                                                                             │
 │   Connects your AS to both: Internet (BGP) and your mesh (WireGuard)       │
@@ -42,8 +43,10 @@ Create an independent AS that:
                                   ▼
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
 │   Mesh Node 1    │    │   Mesh Node 2    │    │   Mesh Node N    │
-│   44.30.127.2    │    │   44.30.127.3    │    │   44.30.127.x    │
-│                  │    │                  │    │                  │
+│   IP from        │    │   IP from        │    │   IP from        │
+│   ${MESH_       │    │   ${MESH_       │    │   ${MESH_       │
+│    ADDRESS_      │    │    ADDRESS_      │    │    ADDRESS_      │
+│    RANGE}        │    │    RANGE}        │    │    RANGE}        │
 │   netclient      │    │   netclient      │    │   netclient      │
 │   (anywhere)     │    │   (anywhere)     │    │   (anywhere)     │
 └──────────────────┘    └──────────────────┘    └──────────────────┘
@@ -53,14 +56,14 @@ Create an independent AS that:
 
 ### Outbound (mesh → Internet)
 
-1. A mesh node (44.30.127.3) wants to reach the Internet
+1. A mesh node (IP from ${MESH_ADDRESS_RANGE}) wants to reach the Internet
 2. Traffic goes to the **border router** (egress gateway)
 3. Border router forwards to ISP via BGP peering
 4. Response comes back the same path
 
 ### Inbound (Internet → mesh)
 
-1. Someone on the Internet wants to reach 44.30.127.3
+1. Someone on the Internet wants to reach a mesh node IP
 2. BGP routing directs traffic to your ISP (your AS is announced)
 3. ISP sends to your **border router**
 4. Border router forwards via WireGuard mesh to the node
@@ -104,9 +107,9 @@ Simple nodes that join the mesh:
 
 | Network | CIDR | Purpose |
 |---------|------|---------|
-| Your AS block | 44.30.127.0/24 | Public IPs announced via BGP |
+| Your AS block | ${MESH_ADDRESS_RANGE} | Public IPs announced via BGP |
 | Mesh overlay | (same as above) | WireGuard mesh uses your public block |
-| BGP peering | (varies) | Link between you and ISP |
+| BGP peering | ${BGP_NETWORK_RANGE} | Link between you and ISP |
 
 **Note:** In this design, mesh IPs are your public IPs. This means services on mesh nodes are directly reachable from the Internet once BGP is established.
 
@@ -120,12 +123,30 @@ Simple nodes that join the mesh:
 4. **Public server**: For Netmaker control plane
 5. **Datacenter presence**: For border router (colocation or VPS with BGP support)
 
+### Configuration
+
+Before deploying, copy and customize environment files:
+
+```bash
+# Root configuration (optional - for shared values)
+cp .env.example .env
+
+# Component-specific configuration
+cp deploy/netmaker/.env.example deploy/netmaker/.env
+cp deploy/bird-border/.env.example deploy/bird-border/.env
+cp deploy/netclient/.env.example deploy/netclient/.env
+cp deploy/rpi-isp/.env.example deploy/rpi-isp/.env  # if using mock ISP
+```
+
+Edit each `.env` file with your specific values. See `.env.example` files for documentation.
+
 ### 1. Deploy Netmaker Server
 
 ```bash
 cd deploy/netmaker
 cp .env.example .env
-# Edit .env with your domain and MASTER_KEY
+# Edit .env with your domain and credentials
+# Required: SERVER_HOST, MASTER_KEY
 docker compose up -d
 ```
 
@@ -135,10 +156,10 @@ See [deploy/netmaker/README.md](deploy/netmaker/README.md) for full instructions
 
 ```bash
 source .env
-curl -X POST "https://your-netmaker-domain/api/networks" \
+curl -X POST "https://${SERVER_HOST}/api/networks" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"netid": "mynet", "addressrange": "44.30.127.0/24"}'
+  -d "{\"netid\": \"${MESH_NETWORK_ID}\", \"addressrange\": \"${MESH_ADDRESS_RANGE}\"}"
 ```
 
 ### 3. Deploy Border Router
@@ -158,7 +179,7 @@ Make the border router announce external routes to the mesh:
 
 ```bash
 # Via Netmaker API
-curl -X POST "https://your-netmaker-domain/api/nodes/mynet/<node-id>/creategateway" \
+curl -X POST "https://${SERVER_HOST}/api/nodes/${MESH_NETWORK_ID}/<node-id>/creategateway" \
   -H "Authorization: Bearer $MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"ranges":["0.0.0.0/0"],"natEnabled":"no"}'
@@ -184,24 +205,27 @@ See [deploy/rpi-isp/README.md](deploy/rpi-isp/README.md) for full mock ISP setup
 ```
 ┌─────────────────┐                    ┌─────────────────┐
 │   RPi (mock)    │◄───── BGP ────────►│  Border Router  │
-│   AS 65001      │     172.30.0.x     │    AS 65000     │
-│   172.30.0.1    │                    │   172.30.0.100  │
-│                 │                    │   44.30.127.x   │
-│ announces test  │                    │                 │
-│ prefixes        │                    │ egress gateway  │
+│ AS ${ISP_AS}   │     ${BGP_         │  AS ${BORDER_  │
+│ ${ISP_IP}      │      NETWORK_       │   ROUTER_AS}    │
+│                 │      RANGE}         │ ${BORDER_      │
+│ announces test  │                    │  ROUTER_IP}     │
+│ prefixes        │                    │                 │
+│                 │                    │ egress gateway  │
 └─────────────────┘                    └─────────────────┘
                                               │
                                               │ mesh
                                               ▼
                                        ┌─────────────────┐
                                        │  Mesh Nodes     │
-                                       │  44.30.127.x    │
+                                       │ ${MESH_        │
+                                       │  ADDRESS_       │
+                                       │  RANGE}         │
                                        └─────────────────┘
 ```
 
 The border router needs a secondary IP in the RPi's network for BGP peering:
 ```bash
-sudo ip addr add 172.30.0.100/24 dev wlp0s20f3
+sudo ip addr add ${BORDER_ROUTER_IP}/24 dev ${BORDER_ROUTER_INTERFACE}
 ```
 
 ## Verification
@@ -215,13 +239,13 @@ docker exec bird-border birdc show route
 ### Mesh Connectivity
 ```bash
 docker exec netclient wg show
-ping 44.30.127.x  # other mesh nodes
+ping <mesh-node-ip>  # other mesh nodes in ${MESH_ADDRESS_RANGE}
 ```
 
 ### End-to-End (from mock ISP)
 ```bash
 # From RPi, should reach any mesh node
-ping 44.30.127.3
+ping <mesh-node-ip>  # any IP in ${MESH_ADDRESS_RANGE}
 ```
 
 ## Production Considerations
@@ -239,8 +263,8 @@ ping 44.30.127.3
 
 ### IP Space
 - For real deployment, use legitimately obtained IP space
-- 44.30.127.0/24 is used here for testing (AMPRNet allocation)
-- Contact your RIR for production IP allocation
+- Default config uses example ranges (update in `.env` files)
+- Contact your RIR (LACNIC, ARIN, RIPE, etc.) for production IP allocation
 
 ## Project Structure
 
